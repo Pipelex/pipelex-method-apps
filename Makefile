@@ -12,14 +12,18 @@
 #     quotes, closing and escaping any quote inside, and `$(value …)` keeps a `$`
 #     in it from being expanded by make, so a title such as `Bob's "$5" app`
 #     arrives intact.
+#   - A blank value is not given: `NAME=` is how a person clears a value, not
+#     how they ask for an empty one. For a switch, `0` is not given either.
 #
 # `$(call opt,NAME,--name)` expands to `--name '<value>'`, or to nothing.
 shq = '$(subst ','\'',$(1))'
-opt = $(if $(filter command line,$(origin $(1))),$(2) $(call shq,$(value $(1))))
-flag = $(if $(filter command line,$(origin $(1))),$(2))
+given = $(if $(filter command line,$(origin $(1))),$(strip $(value $(1))))
+opt = $(if $(call given,$(1)),$(2) $(call shq,$(value $(1))))
+flag = $(if $(filter-out 0,$(call given,$(1))),$(2))
 # Refuse a gesture run without its required variable. Decided by make from the
-# variable's origin, so the value itself never reaches a shell line unquoted.
-require = @$(if $(filter command line,$(origin $(1))),:,echo "$(2)"; exit 2)
+# variable's origin and value, so the value itself never reaches a shell line
+# unquoted.
+require = @$(if $(call given,$(1)),:,echo "$(2)"; exit 2)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
