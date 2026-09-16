@@ -101,6 +101,15 @@ describe("renderTwin", () => {
     }
   });
 
+  it("runs every job inside the template", () => {
+    const twoJobs = `${SOURCE}  build:\n    runs-on: \${{ matrix.os }}\n    steps:\n      - run: make build\n`;
+    const rendered = renderTwin("app-js", "lint-check.yml", twoJobs);
+    assert.equal(
+      rendered.match(/\n {4}defaults:\n {6}run:\n {8}working-directory: app-js\n/g).length,
+      2,
+    );
+  });
+
   it("refuses what it cannot carry faithfully", () => {
     const cases = [
       SOURCE.replace("name: Lint check", 'name: "Lint check"'),
@@ -130,6 +139,13 @@ describe("renderTwin", () => {
         '        with: { node-version: "22", cache: "npm" }',
       ),
       SOURCE.replace("name: Lint check\n", ""),
+      `${SOURCE}  build:\n    runs-on:\n      labels: [ubuntu-latest]\n    steps:\n      - run: make build\n`,
+      `${SOURCE}  shared:\n    uses: octo-org/shared/.github/workflows/x.yml@v1\n`,
+      SOURCE.replace("    runs-on: ubuntu-latest", "    runs-on: \n      group: build-runners"),
+      SOURCE.replace(
+        "    runs-on: ubuntu-latest",
+        "    runs-on: # the larger runners\n      labels: [ubuntu-latest]",
+      ),
     ];
     for (const source of cases) {
       assert.throws(() => renderTwin("app-js", "lint-check.yml", source), TwinError);
@@ -184,6 +200,16 @@ describe("compareTwins and writeTwins", () => {
     ]);
     writeTwins(root, ["app-js"]);
     assert.deepEqual(fs.readdirSync(path.join(root, WORKFLOWS_DIR)), ["family-check.yml"]);
+  });
+
+  it("refuses to write over a hand-written workflow that has a twin's name", () => {
+    const root = family({ "deploy.yml": SOURCE });
+    const handWritten = path.join(root, WORKFLOWS_DIR, "app-js-deploy.yml");
+    fs.mkdirSync(path.dirname(handWritten), { recursive: true });
+    fs.writeFileSync(handWritten, "name: Deploy\n");
+    assert.throws(() => compareTwins(root, ["app-js"]), TwinError);
+    assert.throws(() => writeTwins(root, ["app-js"]), TwinError);
+    assert.equal(fs.readFileSync(handWritten, "utf8"), "name: Deploy\n");
   });
 
   it("refuses a template directory that does not exist", () => {

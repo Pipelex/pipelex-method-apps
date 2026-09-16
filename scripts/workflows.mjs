@@ -15,11 +15,13 @@
  * The rendering is a text transform, not a YAML round trip, so the twin keeps
  * the source's comments and layout. It refuses a source it cannot render
  * faithfully rather than guessing: a quoted name, a job that already sets
- * `defaults`, a flow mapping, a cache other than npm's, and everything GitHub
+ * `defaults`, a job without an inline `runs-on` to set the working directory
+ * after, a flow mapping, a cache other than npm's, and everything GitHub
  * resolves from the repository root rather than from the template's directory
  * — a key named for a path, a file or a directory, a local action, and
  * `hashFiles`. An action input that holds a path under any other name is not
- * recognised, so a new workflow's twin is read before it is committed.
+ * recognised, so a new workflow's twin is read before it is committed. It also
+ * refuses to write over a hand-written root workflow that has a twin's name.
  *
  * Zero dependencies; runs on the Node the templates already need.
  */
@@ -55,10 +57,29 @@ export function renderTwin(template, file, source) {
   };
   const out = [];
   let names = 0;
-  let jobs = 0;
   let inJobs = false;
+  const jobs = [];
+  let job = null;
+  // Every job must have had the working directory placed after its runs-on.
+  const closeJob = () => {
+    if (job && !job.placed) {
+      throw new TwinError(
+        `${origin}: job "${job.name}" has no inline runs-on to set the working directory after`,
+      );
+    }
+    job = null;
+  };
   for (const line of source.replace(/\n$/, "").split("\n")) {
-    if (line === "jobs:") inJobs = true;
+    if (/^[^\s#]/.test(line)) {
+      closeJob();
+      inJobs = /^jobs:\s*(#.*)?$/.test(line);
+    }
+    const jobKey = inJobs && /^ {2}([\w-]+):\s*(#.*)?$/.exec(line);
+    if (jobKey) {
+      closeJob();
+      job = { name: jobKey[1], placed: false };
+      jobs.push(job);
+    }
     const name = /^( {4})?name: (.*)$/.exec(line);
     if (name && (name[1] === undefined || inJobs)) {
       if (/^["']/.test(name[2])) refuse(line, "a quoted name");
@@ -78,9 +99,10 @@ export function renderTwin(template, file, source) {
     }
     if (inJobs && /^ {4}defaults:/.test(line)) refuse(line, "the job already sets defaults");
     out.push(line);
-    if (inJobs && /^ {4}runs-on: /.test(line)) {
+    if (job && /^ {4}runs-on:/.test(line)) {
+      if (!/^ {4}runs-on: *[^\s#]/.test(line)) refuse(line, "a runs-on value that is not inline");
       out.push("    defaults:", "      run:", `        working-directory: ${template}`);
-      jobs += 1;
+      job.placed = true;
     }
     const cache = /^(\s+)(- )?cache:(.*)$/.exec(line);
     if (cache) {
@@ -93,9 +115,9 @@ export function renderTwin(template, file, source) {
       out.push(`${indent}cache-dependency-path: ${template}/package-lock.json`);
     }
   }
+  closeJob();
   if (names !== 1) throw new TwinError(`${origin}: expected one top-level name, found ${names}`);
-  if (jobs === 0)
-    throw new TwinError(`${origin}: no job with a runs-on line to run in ${template}`);
+  if (jobs.length === 0) throw new TwinError(`${origin}: no job to run in ${template}`);
   const header = [
     `${TWIN_MARKER}${origin} — edit that file and re-render.`,
     "# GitHub reads workflows only at the repository root, and the template's own copy travels",
@@ -151,7 +173,11 @@ export function compareTwins(root, templates) {
       ? fs.readFileSync(path.join(root, WORKFLOWS_DIR, file), "utf8")
       : null;
     if (onDisk === null) problems.push({ file, kind: "missing" });
-    else if (onDisk !== text) problems.push({ file, kind: "stale" });
+    else if (!onDisk.startsWith(TWIN_MARKER)) {
+      throw new TwinError(
+        `${WORKFLOWS_DIR}/${file} is hand-written but has a twin's name: rename it, or the template workflow it would be overwritten by`,
+      );
+    } else if (onDisk !== text) problems.push({ file, kind: "stale" });
   }
   for (const file of present.keys()) {
     if (!expected.has(file)) problems.push({ file, kind: "orphaned" });
