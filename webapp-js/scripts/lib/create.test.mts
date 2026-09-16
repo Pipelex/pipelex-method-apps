@@ -22,6 +22,7 @@ import type { PipelexApiClient } from "@pipelex/sdk";
 
 import type { AddMethodPlan } from "./add-method.mts";
 import {
+  appUrl,
   BOOTSTRAP_DIR,
   bootstrapArgs,
   deriveIdentity,
@@ -300,6 +301,23 @@ describe("the env file", () => {
 
   it("refuses a value an env file cannot hold", () => {
     expect(() => setEnvLine(EXAMPLE, "PIPELEX_API_KEY", "a\nb")).toThrow(/line break/);
+  });
+});
+
+// ── Where the app listens ───────────────────────────────────────────────────
+
+describe("appUrl", () => {
+  it.each([
+    [{}, "http://127.0.0.1:4300"],
+    [{ APP_HOST: "", APP_PORT: " " }, "http://127.0.0.1:4300"],
+    [{ APP_PORT: "4301" }, "http://127.0.0.1:4301"],
+    [{ APP_HOST: "localhost" }, "http://localhost:4300"],
+    [{ APP_HOST: "0.0.0.0" }, "http://127.0.0.1:4300"],
+    [{ APP_HOST: "::" }, "http://127.0.0.1:4300"],
+    [{ APP_HOST: "::1" }, "http://[::1]:4300"],
+    [{ APP_HOST: "192.168.1.20" }, "http://192.168.1.20:4300"],
+  ])("reads %j as %s", (env, url) => {
+    expect(appUrl(env)).toBe(url);
   });
 });
 

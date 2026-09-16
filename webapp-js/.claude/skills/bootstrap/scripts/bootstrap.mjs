@@ -281,10 +281,12 @@ A Next.js app that runs its methods through the [Pipelex](https://pipelex.com) A
 
 \`\`\`bash
 make install   # once
-make dev       # http://localhost:4300
+make dev       # http://127.0.0.1:4300
 \`\`\`
 
 The app reads \`PIPELEX_API_KEY\` and \`PIPELEX_BASE_URL\` from \`.env.local\`; \`.env.example\` lists both.
+
+The server listens on loopback only, because anyone who can reach it runs methods billed to that key. \`make dev APP_HOST=0.0.0.0\` opens it to your network — do that only on a network you trust — and \`APP_PORT=4301\` moves it off port 4300. \`make help\` says where it listens.
 
 ## Work on it
 
