@@ -17,6 +17,7 @@
     "codegen:check": "node --experimental-strip-types scripts/codegen-check.mts",
     "codegen:verify": "node --experimental-strip-types scripts/codegen-verify.mts",
     "add-method": "node --experimental-strip-types scripts/add-method.mts",
+    "create": "node --experimental-strip-types scripts/create.mts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

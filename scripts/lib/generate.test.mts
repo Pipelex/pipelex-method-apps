@@ -26,7 +26,7 @@ import {
   type PipelexApiClient,
 } from "@pipelex/sdk";
 
-import { generateMethod, writeTree } from "./generate.mts";
+import { generateMethod, readMethodProse, writeTree } from "./generate.mts";
 import {
   CONTRACTS_FILENAME,
   hashSource,
@@ -441,4 +441,54 @@ describe("generateMethod", () => {
     expect(errors.join("\n")).toContain(`no ${view} view`);
     await expect(readdir(outDir)).rejects.toThrow();
   });
+
+  // The writer lays the lock, the sidecar and `contracts.ts` over whatever the
+  // server returned, so an artifact on one of those names would be overwritten
+  // silently and the tree would fail its own check forever after. A contained
+  // path that normalizes onto one of them is the same collision.
+  it.each([CONTRACTS_FILENAME, SOURCES_SIDECAR, LOCK_FILENAME, `nested/../${CONTRACTS_FILENAME}`])(
+    "refuses a server artifact that lands on %s, writing nothing",
+    async (artifactPath) => {
+      noDrifts();
+      const errors: string[] = [];
+      vi.spyOn(console, "error").mockImplementation((line: unknown) => {
+        errors.push(String(line));
+      });
+      const client = fakeClient({
+        codegen: vi.fn().mockResolvedValue({
+          ...VALID_REPORT,
+          artifacts: [...VALID_REPORT.artifacts, { path: artifactPath, content: "export {};\n" }],
+        }),
+      });
+
+      expect(await generateMethod(client, FILES_SOURCE, outDir, "https://api.example")).toBe(
+        "failed",
+      );
+      expect(errors.join("\n")).toContain("land on a file this script writes itself");
+      expect(client.validateFiles).not.toHaveBeenCalled();
+      await expect(readdir(outDir)).rejects.toThrow();
+    },
+  );
+});
+
+describe("readMethodProse", () => {
+  it("reads the domain description and each pipe's, qualified by the domain", () => {
+    expect(
+      readMethodProse({
+        domain: "receipt_review",
+        description: "Read receipts.",
+        pipe: { review_receipts: { description: "Summarize each one." }, bare: {} },
+      }),
+    ).toEqual({
+      description: "Read receipts.",
+      pipeDescriptions: { "receipt_review.review_receipts": "Summarize each one." },
+    });
+  });
+
+  it.each([undefined, null, "text", [], { description: "   ", pipe: [] }])(
+    "tolerates a blueprint it cannot read (%j)",
+    (blueprint) => {
+      expect(readMethodProse(blueprint)).toEqual({ description: null, pipeDescriptions: {} });
+    },
+  );
 });

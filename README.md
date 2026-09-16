@@ -2,32 +2,34 @@
 
 A Next.js 16 template for an app that runs [MTHDS](https://mthds.ai) methods through the [Pipelex](https://pipelex.com) API with [`@pipelex/sdk`](https://www.npmjs.com/package/@pipelex/sdk). Each method's input form and result view are rendered from the method's own contract, so adding a method writes no form fields and no result markup.
 
-The template ships no method. It ships what every method needs: blocking and durable execution, a server-side input gate, file uploads, classified errors, a cost report, and the codegen kit that projects a method into typed code. You add methods with one command.
+The template ships no method. It ships what every method needs: blocking and durable execution, a server-side input gate, file uploads, classified errors, a cost report, and the codegen kit that projects a method into typed code. One command turns a copy of it into the app for your method.
 
 Looking for worked examples instead? [`pipelex-starter-js`](https://github.com/Pipelex/pipelex-starter-js) is the gallery this template was extracted from, with several demo methods presented as tabs.
 
 ## Use this template
 
-1. Click **Use this template** at the top-right of the GitHub page to create your own repository, then clone it.
-2. Open it in [Claude Code](https://claude.com/claude-code) and run `/bootstrap`. It names the project, writes its title and description into `src/site.ts`, renders the project's own README, resets the version and changelog, applies your license, and runs the checks.
-3. Add your first method:
+Click **Use this template** at the top-right of the GitHub page to create your own repository, clone it, and run one command with the method you have:
 
-   ```bash
-   cp .env.example .env.local   # set PIPELEX_API_KEY
-   make install
-   PIPELEX_BASE_URL=https://api-dev.pipelex.com make add-method METHOD=github.com/Pipelex/methods/text_stats@v0.1.1
-   make dev                     # http://localhost:4300
-   ```
+```bash
+export PIPELEX_API_KEY=…                               # from app.pipelex.com
+export PIPELEX_BASE_URL=https://api-dev.pipelex.com    # for now — see below
+make create METHOD=path/to/my_method.mthds
+make dev                                               # http://localhost:4300
+```
 
-`METHOD` is a published package address or a method id from your organization's catalog (`mt_…`, from [app.pipelex.com](https://app.pipelex.com)).
+`METHOD` is a `.mthds` file or a directory of them, a method id from your organization's catalog (`mt_…`, from [app.pipelex.com](https://app.pipelex.com)), or a published package address (`github.com/Pipelex/methods/text_stats@v0.1.1`).
+
+`make create` scaffolds the method, names the project after it (the package name, the title and the description all come from the method, and `NAME=`, `TITLE=` and `DESCRIPTION=` override them), writes `.env.local` from your shell, and runs `make all`. It commits nothing, so `git diff` shows everything it did. `DRY_RUN=1` prints the plan first. [`docs/create.md`](docs/create.md) is the reference.
+
+To choose every value yourself instead, open the repository in [Claude Code](https://claude.com/claude-code), run `/bootstrap`, then `make add-method METHOD=…`.
 
 ## What a method looks like here
 
-With no method, the page shows an empty state that names the command above. With one method, its form is the page. With several, they are tabs. The registry is `src/methods.ts`.
+With no method, the page shows an empty state that names `make add-method`. With one method, its form is the page. With several, they are tabs. The registry is `src/methods.ts`.
 
-`make add-method` writes one vertical slice per method:
+`make add-method` writes one vertical slice per method, and `make create` runs it for the first one:
 
-- `methods/<name>/method.json` — the selector naming where the method lives. The method is never copied into the repository; moving to another version is editing the tag and running `npm run codegen`.
+- `methods/<name>/` — the method's own `.mthds` files, or a `method.json` naming a method that lives elsewhere. Changing the method is editing the files, or the tag, and running `npm run codegen`.
 - `src/generated/<name>/` — the method's zod schemas, binders, input and output contracts, and the codegen lock. Committed, and never edited by hand.
 - `src/types/`, `src/actions/`, `src/components/` — a typed narrower, the Server Actions for both execution modes with a test, and the form.
 - `src/methods.ts` — one import and one registry entry.
@@ -57,26 +59,27 @@ The command refuses rather than overwriting a slice that already exists, and `DR
 | `PIPELEX_BASE_URL`           | Pipelex API base URL                                                                              | `https://api.pipelex.com` |
 | `NEXT_PUBLIC_EXECUTION_MODE` | Default execution mode for every method — `durable` or `blocking`. Each method also has a toggle. | `durable`                 |
 
-**`make add-method`, `npm run codegen` and `npm run codegen:verify` currently need `PIPELEX_BASE_URL=https://api-dev.pipelex.com`.** `api.pipelex.com` does not yet serve the form views codegen asks for, nor the `method_ref` selector a package address needs. Each script names the missing capability rather than failing obscurely. `make all` needs neither a key nor a network.
+**`make create`, `make add-method`, `npm run codegen` and `npm run codegen:verify` currently need `PIPELEX_BASE_URL=https://api-dev.pipelex.com`.** `api.pipelex.com` does not yet serve the form views codegen asks for, nor the `method_ref` selector a package address needs. Each script names the missing capability rather than failing obscurely. `make all` needs neither a key nor a network.
 
 A variable already exported in your shell wins over `.env.local`.
 
 ## Make targets
 
-| Target                | Purpose                                                                                               |
-| --------------------- | ----------------------------------------------------------------------------------------------------- |
-| `make dev`            | Start the Next.js dev server on port 4300                                                             |
-| `make build`          | Production build                                                                                      |
-| `make add-method`     | Scaffold a method into the app — `METHOD=<mt_… \| address>` (needs an API key)                        |
-| `make codegen`        | Regenerate `src/generated/` from `methods/` (needs an API key)                                        |
-| `make codegen-check`  | Prove `src/generated/` is current — offline, no key                                                   |
-| `make codegen-verify` | Ask the API whether the committed types still match the methods (needs an API key)                    |
-| `make test`           | Unit tests                                                                                            |
-| `make test-e2e`       | **Optional** Playwright e2e — a live spec costs an LLM call (prompts first; auto-skips without a key) |
-| `make check`          | lint + format-check + typecheck + codegen-check                                                       |
-| `make all`            | check + test + build                                                                                  |
-| `make use-local`      | Install the sibling `../pipelex-sdk-js` and `../mthds-form` checkouts into `node_modules`             |
-| `make use-npm`        | Restore the published `@pipelex/sdk` and `@pipelex/mthds-form`                                        |
+| Target                | Purpose                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| `make dev`            | Start the Next.js dev server on port 4300                                                               |
+| `make build`          | Production build                                                                                        |
+| `make create`         | Turn the template into the app for one method — `METHOD=<bundle \| mt_… \| address>` (needs an API key) |
+| `make add-method`     | Scaffold a method into the app — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                |
+| `make codegen`        | Regenerate `src/generated/` from `methods/` (needs an API key)                                          |
+| `make codegen-check`  | Prove `src/generated/` is current — offline, no key                                                     |
+| `make codegen-verify` | Ask the API whether the committed types still match the methods (needs an API key)                      |
+| `make test`           | Unit tests                                                                                              |
+| `make test-e2e`       | **Optional** Playwright e2e — a live spec costs an LLM call (prompts first; auto-skips without a key)   |
+| `make check`          | lint + format-check + typecheck + codegen-check                                                         |
+| `make all`            | check + test + build                                                                                    |
+| `make use-local`      | Install the sibling `../pipelex-sdk-js` and `../mthds-form` checkouts into `node_modules`               |
+| `make use-npm`        | Restore the published `@pipelex/sdk` and `@pipelex/mthds-form`                                          |
 
 `make help` lists them all.
 
@@ -86,9 +89,11 @@ Next.js 16 (App Router), React 19, TypeScript 5 (strict), Tailwind CSS 4 (config
 
 ## Documentation
 
+- [`docs/create.md`](docs/create.md) — turning the template into the app for one method.
 - [`docs/add-method.md`](docs/add-method.md) — adding a method, and removing one.
 - [`docs/codegen.md`](docs/codegen.md) — the generated types and the checks that keep them current.
 - [`docs/input-form.md`](docs/input-form.md) — how the input form and the result view are rendered from a method's contract.
+- [`docs/ci.md`](docs/ci.md) — what the pull-request checks prove, and the live job that runs `make create` for real.
 - [`docs/chrome-lineage.md`](docs/chrome-lineage.md) — what this template took from the gallery, and what it changed.
 - [`CLAUDE.md`](CLAUDE.md) — the project guide for coding agents.
 

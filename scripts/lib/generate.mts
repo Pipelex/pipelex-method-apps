@@ -40,6 +40,7 @@ import { assertSelectorSupport, explainSelectorFailure, selectorKindsOf } from "
 import {
   assertSecureBaseUrl,
   CONTRACTS_FILENAME,
+  DERIVED_ARTIFACTS,
   discoverMethods,
   hashSource,
   isContainedPath,
@@ -216,11 +217,61 @@ function explain(
   return error instanceof Error ? error.message : String(error);
 }
 
+/** The files `writeTree` writes itself, which no server artifact may land on. */
+const WRITER_OWNED: ReadonlySet<string> = new Set([
+  LOCK_FILENAME,
+  SOURCES_SIDECAR,
+  ...DERIVED_ARTIFACTS,
+]);
+
+/**
+ * What the method says about itself in prose, read from the validate report's
+ * `bundle_blueprint` — which the SDK types as opaque on purpose, so every field
+ * is checked rather than assumed.
+ *
+ * Written into no artifact. It is there for a caller that describes an app
+ * after its method, and a missing value is simply `null`: such a caller has a
+ * fallback.
+ * For a bundle of several files the blueprint is the file that declares the
+ * domain's description and main pipe, so a pipe declared in another file has
+ * no entry in `pipeDescriptions`.
+ */
+export interface MethodProse {
+  /** The domain's own `description`. */
+  description: string | null;
+  /** Each pipe's `description`, keyed by qualified ref (`domain.pipe_code`). */
+  pipeDescriptions: Record<string, string>;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+/** Read `MethodProse` out of an opaque blueprint, tolerating any shape. */
+export function readMethodProse(blueprint: unknown): MethodProse {
+  const record = (value: unknown): Record<string, unknown> =>
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const fields = record(blueprint);
+  const domain = nonEmptyString(fields.domain);
+  const pipeDescriptions: Record<string, string> = {};
+  if (domain !== null) {
+    for (const [code, pipe] of Object.entries(record(fields.pipe))) {
+      const description = nonEmptyString(record(pipe).description);
+      if (description !== null) pipeDescriptions[`${domain}.${code}`] = description;
+    }
+  }
+  return { description: nonEmptyString(fields.description), pipeDescriptions };
+}
+
 /** The three `/v1/validate` payloads `contracts.ts` is rendered from. */
 export interface ValidateArtifacts {
   pipeIoContracts: PipeIOContracts;
   inputForm: InputForm;
   outputForm: OutputForm;
+  /** The method's own prose, for a caller naming an app after it. Written into no artifact. */
+  prose: MethodProse;
   /**
    * The report's own entry pipe, carried through for the scaffold's pipe rule
    * (`make add-method`) and written into no artifact.
@@ -291,6 +342,7 @@ export async function fetchValidateArtifacts(
       pipeIoContracts: response.pipe_io_contracts,
       inputForm: response.input_form,
       outputForm: response.output_form,
+      prose: readMethodProse(response.bundle_blueprint),
       defaultPipeRef: response.default_pipe_ref ?? null,
     };
   } catch (error) {
@@ -386,19 +438,25 @@ export async function fetchGenerated(
     return null;
   }
 
-  // The derived artifacts are written last, so a server artifact sharing one
-  // of their names would be silently overwritten by ours: `writeTree` returns
-  // normally, the sidecar records our content, and the lock still expects the
-  // server's — leaving `codegen:check` reporting `hand-edited` forever, with a
-  // remedy ("run npm run codegen") that reproduces the same tree. Same class
-  // as the `lock_filename` guard above, and not hypothetical: the roadmap has
-  // the API serving an input-form descriptor at exactly this seam.
-  const colliding = artifacts.filter((artifact) => artifact.path === CONTRACTS_FILENAME);
+  // The writer owns three names in the tree — the lock, the sidecar and every
+  // derived artifact — and writes each after the server's artifacts, so a
+  // server artifact landing on one of them would be silently overwritten:
+  // `writeTree` returns normally, the sidecar records our content, and the lock
+  // still expects the server's — leaving `codegen:check` reporting `hand-edited`
+  // forever, with a remedy ("run npm run codegen") that reproduces the same
+  // tree. Same class as the `lock_filename` guard above, and not hypothetical:
+  // the roadmap has the API serving an input-form descriptor at exactly this
+  // seam. The path is normalized first, because `nested/../contracts.ts` is
+  // contained and still lands on the same file.
+  const colliding = artifacts.filter((artifact) =>
+    WRITER_OWNED.has(path.posix.normalize(artifact.path.replaceAll("\\", "/"))),
+  );
   if (colliding.length > 0) {
     console.error(
-      `\n✗ ${source.name} — the server now returns an artifact named '${CONTRACTS_FILENAME}', ` +
-        `which this script also emits. Nothing was written; stop emitting it locally ` +
-        `and take the server's, or report it upstream.`,
+      `\n✗ ${source.name} — the server returned artifact path(s) that land on a file this ` +
+        `script writes itself (${[...WRITER_OWNED].join(", ")}): ` +
+        `${colliding.map((artifact) => artifact.path).join(", ")}. ` +
+        `Nothing was written; report it upstream.`,
     );
     return null;
   }

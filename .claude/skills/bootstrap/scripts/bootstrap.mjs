@@ -19,14 +19,19 @@
  *    or a quote is escaped once, by `JSON.stringify`, and nothing is written
  *    inside markup.
  *
+ * A project does not inherit what only the template needs. The files of that
+ * kind are removed whole (`REMOVALS`: the template's `release` skill, and the
+ * `make create` gesture with its test, its doc and its CI job), and the passages
+ * of shared files that describe them sit between `template-only:begin` and
+ * `template-only:end` markers, which are removed with everything between them.
+ *
  * Every file it writes goes through the repo's own Prettier when Prettier is
  * installed, so `make all` is green straight after a run. The script only
  * transforms files: it does NOT touch git, run `npm install`, run the checks,
- * or remove the bootstrap skill — the SKILL.md sequences those. It does remove the template's own `release` skill, which releases the
- * template from inside the Pipelex workspace and means nothing in a project.
- * Re-running on an already-bootstrapped repo requires --force. Zero
- * dependencies beyond the optional Prettier; runs on the same Node 22+ the
- * project needs.
+ * or remove the bootstrap skill — the SKILL.md sequences those, or
+ * `make create` does. Re-running on an already-bootstrapped repo requires
+ * --force. Zero dependencies beyond the optional Prettier; runs on the same
+ * Node 22+ the project needs.
  */
 
 import fs from "node:fs";
@@ -50,8 +55,24 @@ const CLAUDE_DESCRIPTION =
 const CHARTER_MARKER = "This repo is a **template**.";
 
 // What the template carries for itself and a project does not: the release
-// skill releases the template from inside the Pipelex workspace.
-export const REMOVALS = [".claude/skills/release"];
+// skill releases the template from inside the Pipelex workspace, and
+// `make create` turns the template into a project — once, which is this run.
+export const REMOVALS = [
+  ".claude/skills/release",
+  "scripts/create.mts",
+  "scripts/lib/create.mts",
+  "scripts/lib/create.test.mts",
+  "docs/create.md",
+  ".github/workflows/create-live.yml",
+];
+
+// The npm script of the gesture REMOVALS takes away.
+const TEMPLATE_ONLY_SCRIPTS = ["create"];
+
+// The markers around a template-only passage of a shared file. A line holding
+// either one is a marker line, whatever comment syntax surrounds it.
+export const TEMPLATE_ONLY_BEGIN = "template-only:begin";
+export const TEMPLATE_ONLY_END = "template-only:end";
 
 // npm package name rules (legacy-strict subset: new packages must be lowercase
 // URL-safe, optionally scoped). Anything else breaks `npm install` later.
@@ -187,7 +208,53 @@ export function transformPackageJson(text, names, opts) {
   out.name = names.name;
   out.version = RESET_VERSION; // fresh project, fresh semver — CHANGELOG.md is reset to match
   out.description = opts.description;
+  if (out.scripts) {
+    out.scripts = Object.fromEntries(
+      Object.entries(out.scripts).filter(([script]) => !TEMPLATE_ONLY_SCRIPTS.includes(script)),
+    );
+  }
   return JSON.stringify(out, null, 2) + "\n";
+}
+
+/**
+ * Remove every template-only passage: each marker line and everything between
+ * a begin and its end. A blank line left doubled by the removal is collapsed,
+ * so a file Prettier does not format (the Makefile) stays tidy too.
+ */
+export function stripTemplateOnly(text, rel) {
+  const lines = text.split(/(?<=\n)/);
+  const kept = [];
+  let inside = false;
+  let blocks = 0;
+  let collapse = false;
+  for (const line of lines) {
+    if (inside) {
+      if (line.includes(TEMPLATE_ONLY_END)) {
+        inside = false;
+        collapse = true;
+      }
+      continue;
+    }
+    if (line.includes(TEMPLATE_ONLY_BEGIN)) {
+      inside = true;
+      blocks += 1;
+      continue;
+    }
+    if (collapse && line.trim() === "" && (kept.length === 0 || kept.at(-1).trim() === "")) {
+      collapse = false;
+      continue;
+    }
+    collapse = false;
+    kept.push(line);
+  }
+  if (inside) {
+    warn(`${rel}: a template-only passage is never closed; left as-is.`);
+    return text;
+  }
+  if (blocks === 0) {
+    warn(`${rel}: no template-only passage found (already stripped?); skipped.`);
+  }
+  return kept.join("");
 }
 
 function licenseLine(lic) {
@@ -261,6 +328,7 @@ export function stripTemplateParagraph(text) {
 }
 
 export function transformClaudeMd(text, names, opts) {
+  text = stripTemplateOnly(text, "CLAUDE.md");
   if (text.includes(CLAUDE_DESCRIPTION)) {
     text = text.replace(CLAUDE_DESCRIPTION, literally(opts.description));
   } else {
@@ -370,8 +438,14 @@ export const TARGETS = [
   { rel: "README.md", transform: renderReadme },
   { rel: "CLAUDE.md", transform: transformClaudeMd },
   // AGENTS.md carries the template name in its heading only; its rules are
-  // generic to any project built from this template.
-  { rel: "AGENTS.md", transform: applyNameTokens },
+  // generic to any project built from this template, but for the one about
+  // `make create`, which is the template's alone.
+  {
+    rel: "AGENTS.md",
+    transform: (text, names) => applyNameTokens(stripTemplateOnly(text, "AGENTS.md"), names),
+  },
+  { rel: "Makefile", transform: (text) => stripTemplateOnly(text, "Makefile") },
+  { rel: "docs/ci.md", transform: (text) => stripTemplateOnly(text, "docs/ci.md") },
   { rel: "LICENSE", transform: (text, _names, opts) => transformLicense(text, opts) },
   { rel: "CHANGELOG.md", transform: (text, _names, opts) => resetChangelog(text, opts) },
   { rel: "src/site.ts", transform: transformSite },
@@ -460,11 +534,13 @@ export async function run(root, names, opts) {
     }
   }
   for (const rel of removals) {
+    // A directory is shown with its trailing slash, a file without.
+    const shown = fs.statSync(path.join(root, rel)).isDirectory() ? `${rel}/` : rel;
     if (opts.dryRun) {
-      console.log(`  remove  ${rel}/`);
+      console.log(`  remove  ${shown}`);
     } else {
       fs.rmSync(path.join(root, rel), { recursive: true, force: true });
-      console.log(`  removed ${rel}/`);
+      console.log(`  removed ${shown}`);
     }
   }
   if (edits.length === 0 && removals.length === 0) {

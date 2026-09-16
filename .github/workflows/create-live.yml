@@ -1,0 +1,87 @@
+name: Create live
+
+# Runs `make create` for real, against a Pipelex API, on a fresh checkout of the
+# template — the keyed half of the proof that the gesture leaves a working app
+# (see docs/ci.md). Dispatched by hand and never on a pull request: it needs an
+# API key and spends codegen and validate calls. The bootstrap removes this file
+# from every project the template creates.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: The Pipelex API base URL the gesture runs against
+        required: true
+        default: https://api-dev.pipelex.com
+
+permissions:
+  contents: read
+
+jobs:
+  create:
+    name: make create (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: a bundle
+            method: scripts/lib/fixtures/bundles/receipt-review
+          - label: a published address
+            method: github.com/Pipelex/methods/text_stats@v0.1.1
+    env:
+      HAS_KEY: ${{ secrets.PIPELEX_API_KEY != '' }}
+    steps:
+      - name: Say that nothing ran without a key
+        if: env.HAS_KEY != 'true'
+        run: |
+          message="PIPELEX_API_KEY is not a repository secret, so make create was not run. See docs/ci.md."
+          echo "::warning::${message}"
+          echo "${message}" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/checkout@v4
+        if: env.HAS_KEY == 'true'
+
+      - name: Set up Node.js
+        if: env.HAS_KEY == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        if: env.HAS_KEY == 'true'
+        run: npm ci
+
+      - name: Create the app
+        if: env.HAS_KEY == 'true'
+        env:
+          PIPELEX_API_KEY: ${{ secrets.PIPELEX_API_KEY }}
+          PIPELEX_BASE_URL: ${{ inputs.base_url }}
+          METHOD: ${{ matrix.method }}
+        # `make create` runs `make all` itself, so a red check fails this step.
+        run: make create METHOD="$METHOD"
+
+      - name: Check the project is what the gesture promised
+        if: env.HAS_KEY == 'true'
+        env:
+          PIPELEX_BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -eu
+          name=$(node -p 'require("./package.json").name')
+          test "$name" != pipelex-method-app || { echo "package.json still names the template"; exit 1; }
+          for gone in .claude/skills/bootstrap .claude/skills/release scripts/create.mts docs/create.md; do
+            test ! -e "$gone" || { echo "$gone is still here"; exit 1; }
+          done
+          test "$(grep -c '^PIPELEX_BASE_URL=' .env.local)" = 1
+          grep -qx "PIPELEX_BASE_URL=${PIPELEX_BASE_URL}" .env.local
+          git status --short
+
+      - name: Install Playwright's browser
+        if: env.HAS_KEY == 'true'
+        run: npx playwright install --with-deps chromium
+
+      # The offline spec: the page serves the project's title and the method's
+      # form. It runs no method, so it costs nothing.
+      - name: Serve the page
+        if: env.HAS_KEY == 'true'
+        run: npx playwright test e2e/home.spec.ts

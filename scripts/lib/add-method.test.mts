@@ -13,7 +13,7 @@
 // re-fetched. The one thing read from the real repo is `src/methods.ts`: the
 // anchor test exists precisely to fail the day a template edit moves an anchor.
 
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -35,9 +35,11 @@ import {
   humanize,
   IMPORTS_ANCHOR,
   kebabCase,
+  looksLikePath,
   parseArgs,
   parseMethodArg,
   pascalCase,
+  readBundle,
   registerMethod,
   renderManifest,
   runAddMethod,
@@ -49,6 +51,8 @@ import {
 } from "./add-method.mts";
 import { renderAction, renderActionTest, renderAdapter, renderForm } from "./add-method.mts";
 import { MANIFEST_FILENAME, REPO_ROOT } from "./shared.mts";
+import RECEIPT_REVIEW_CODEGEN from "./fixtures/recorded/receipt-review.codegen.json" with { type: "json" };
+import RECEIPT_REVIEW_VALIDATE from "./fixtures/recorded/receipt-review.validate.json" with { type: "json" };
 import {
   DOCUMENTS_CONTRACTS,
   DOCUMENTS_INPUT_FORM,
@@ -91,8 +95,21 @@ describe("parseMethodArg", () => {
       { method_ref: "github.com/Pipelex/methods/documents" },
     ],
     ["  github.com/o/r  ", { method_ref: "github.com/o/r" }],
-  ])("parses %s", (arg, expected) => {
-    expect(parseMethodArg(arg)).toEqual(expected);
+  ])("parses the selector %s", (arg, expected) => {
+    expect(parseMethodArg(arg)).toEqual({ kind: "selector", selector: expected });
+  });
+
+  it.each([
+    "cv_screening.mthds",
+    "./bundles/cv",
+    "../cv",
+    "/tmp/cv",
+    "~/cv",
+    "methods/text-stats",
+    "bundles/cv/main.mthds",
+    "C:\\bundles\\cv",
+  ])("reads %s as a bundle path, kept as given", (arg) => {
+    expect(parseMethodArg(arg)).toEqual({ kind: "bundle", path: arg });
   });
 
   it.each([
@@ -100,11 +117,27 @@ describe("parseMethodArg", () => {
     ["mt_", "malformed id"],
     ["mt_bad id", "id with a space"],
     ["github.com/Pipelex", "address with no repository"],
-    ["methods/text_stats", "path that is not an address"],
     ["github.com/o/r@v1@v2", "two tags"],
-    ["../../etc/passwd", "a path"],
+    ["github.com/o/r@", "an empty tag"],
   ])("refuses %s (%s)", (arg) => {
     expect(() => parseMethodArg(arg)).toThrow(AddMethodError);
+  });
+});
+
+describe("looksLikePath", () => {
+  // An address starts with its host, and a host has a dot; nothing else does.
+  it.each([
+    ["github.com/o/r", false],
+    ["gitlab.example.org/o/r", false],
+    ["bundles/cv", true],
+    ["cv", true],
+    ["./cv", true],
+    [".", true],
+    ["..", true],
+    ["x.mthds", true],
+    ["github.com/o/r/main.mthds", true],
+  ])("%s → %s", (value, expected) => {
+    expect(looksLikePath(value)).toBe(expected);
   });
 });
 
@@ -116,6 +149,114 @@ describe("addressSegments", () => {
       "methods",
       "text_stats",
     ]);
+  });
+});
+
+// ── The bundle ──────────────────────────────────────────────────────────────
+
+/** The fixture bundle, read in place from this checkout. */
+const RECEIPTS_DIR = path.join(
+  REPO_ROOT,
+  "scripts",
+  "lib",
+  "fixtures",
+  "bundles",
+  "receipt-review",
+);
+
+describe("readBundle", () => {
+  let app: string;
+  let outside: string;
+
+  beforeEach(async () => {
+    app = await mkdtemp(path.join(tmpdir(), "read-bundle-app-"));
+    outside = await mkdtemp(path.join(tmpdir(), "read-bundle-src-"));
+    await mkdir(path.join(app, "methods"), { recursive: true });
+  });
+
+  afterEach(async () => {
+    await rm(app, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  async function put(root: string, relative: string, content = 'domain = "x"\n'): Promise<void> {
+    await mkdir(path.dirname(path.join(root, relative)), { recursive: true });
+    await writeFile(path.join(root, relative), content, "utf-8");
+  }
+
+  it("takes every .mthds file under a directory, keeping their relative paths", async () => {
+    await put(outside, "cv/main.mthds");
+    await put(outside, "cv/steps/screen.mthds");
+    await put(outside, "cv/notes.md");
+
+    const bundle = await readBundle("cv", outside, app);
+
+    expect(bundle.inPlace).toBeNull();
+    expect(bundle.display).toBe("cv/");
+    expect(bundle.files.map((file) => [file.relative, file.label])).toEqual([
+      ["main.mthds", path.join("cv", "main.mthds")],
+      ["steps/screen.mthds", path.join("cv", "steps", "screen.mthds")],
+    ]);
+  });
+
+  it("takes a single file alone, under its own name", async () => {
+    await put(outside, "cv/main.mthds");
+    await put(outside, "cv/other.mthds");
+
+    const bundle = await readBundle(path.join(outside, "cv", "main.mthds"), app, app);
+
+    expect(bundle.files.map((file) => file.relative)).toEqual(["main.mthds"]);
+    // Outside the directory it was typed in, a path is named absolutely.
+    expect(bundle.files[0]!.label).toBe(path.join(outside, "cv", "main.mthds"));
+  });
+
+  it("reads a whole method directory in place, whichever of its files was named", async () => {
+    await put(app, "methods/cv/main.mthds");
+    await put(app, "methods/cv/screen.mthds");
+
+    for (const given of ["methods/cv", "methods/cv/", "methods/cv/screen.mthds"]) {
+      const bundle = await readBundle(given, app, app);
+      expect(bundle.inPlace).toBe("cv");
+      expect(bundle.files.map((file) => file.label)).toEqual([
+        "methods/cv/main.mthds",
+        "methods/cv/screen.mthds",
+      ]);
+    }
+  });
+
+  it.each([
+    ["nope", "a path that is not there", /is not a file or a directory/],
+    ["notes.md", "a file that is not a bundle", /is not a \.mthds file/],
+    ["empty", "a directory with no bundle", /holds no \.mthds file/],
+  ])("refuses %s (%s)", async (given, _what, message) => {
+    await put(outside, "notes.md", "# notes\n");
+    await mkdir(path.join(outside, "empty"));
+    await expect(readBundle(given, outside, app)).rejects.toThrow(message);
+  });
+
+  it("refuses methods/ itself, and a file sitting directly in it", async () => {
+    await put(app, "methods/stray.mthds");
+    await expect(readBundle("methods", app, app)).rejects.toThrow(/methods\/ directory itself/);
+    await expect(readBundle("methods/stray.mthds", app, app)).rejects.toThrow(
+      /sits directly in methods\//,
+    );
+  });
+
+  it("refuses a directory that contains the app", async () => {
+    await expect(readBundle(app, outside, app)).rejects.toThrow(/contains this app/);
+    await expect(readBundle(path.dirname(app), outside, app)).rejects.toThrow(/contains this app/);
+  });
+
+  it("refuses a method directory holding a manifest beside its bundle", async () => {
+    await put(app, "methods/cv/main.mthds");
+    await put(app, `methods/cv/${MANIFEST_FILENAME}`, "{}\n");
+    await expect(readBundle("methods/cv", app, app)).rejects.toThrow(/holds one or the other/);
+  });
+
+  it("refuses a symlink inside the bundle rather than follow or skip it", async () => {
+    await put(outside, "cv/main.mthds");
+    await symlink(path.join(outside, "cv", "main.mthds"), path.join(outside, "cv", "link.mthds"));
+    await expect(readBundle("cv", outside, app)).rejects.toThrow(AddMethodError);
   });
 });
 
@@ -167,7 +308,7 @@ describe("the name derivations", () => {
 
   it("puts every emitted file where the app's conventions place it", () => {
     expect(scaffoldPaths(scaffoldNames("text-stats"))).toEqual({
-      manifestDir: "methods/text-stats",
+      methodDir: "methods/text-stats",
       manifest: "methods/text-stats/method.json",
       generatedDir: "src/generated/text-stats",
       adapter: "src/types/textStatsPipeline.ts",
@@ -477,17 +618,31 @@ describe("registerMethod", () => {
 
 const TEXT_STATS_PLAN: ScaffoldPlan = {
   names: scaffoldNames("text-stats"),
-  selector: { method_ref: TEXT_STATS_REF },
+  source: { kind: "selector", selector: { method_ref: TEXT_STATS_REF } },
   pipe: { ref: "text_stats.analyze_text", domain: "text_stats", code: "analyze_text" },
   binding: { conceptCode: "Text", plural: false },
   files: [],
   gating: true,
 };
 
+/** The bundle arm, as the receipt-review fixture scaffolds: a list of documents in, a list out. */
+const RECEIPTS_PLAN: ScaffoldPlan = {
+  names: scaffoldNames("receipt-review"),
+  source: { kind: "files" },
+  pipe: {
+    ref: "receipt_review.review_receipts",
+    domain: "receipt_review",
+    code: "review_receipts",
+  },
+  binding: { conceptCode: "ReceiptSummary", plural: true },
+  files: [{ path: "receipts[]", kind: "document" }],
+  gating: false,
+};
+
 /** The plural + document variant, built from the `documents` measurements. */
 const DOCUMENTS_PLAN: ScaffoldPlan = {
   names: scaffoldNames("documents", "Document pages"),
-  selector: { method_id: "mt_ca0aa9d3-61ac-4db1-8b46-fb0cc75787df" },
+  source: { kind: "selector", selector: { method_id: "mt_ca0aa9d3-61ac-4db1-8b46-fb0cc75787df" } },
   pipe: { ref: "documents.extract_text_pages", domain: "documents", code: "extract_text_pages" },
   binding: { conceptCode: "Page", plural: true },
   files: [{ path: "document", kind: "document" }],
@@ -512,6 +667,12 @@ describe("renderAdapter", () => {
     expect(source).toContain("throw new BadPipelineOutputError(");
     // No shape is declared: if this file lists fields, it duplicates the method.
     expect(source).not.toMatch(/z\.object\(\{\s*\w+:/);
+  });
+
+  it("names the bundle's directory as the source of a bundle-sourced slice", () => {
+    const source = renderAdapter(RECEIPTS_PLAN);
+    expect(source).toContain("the bundle in `methods/receipt-review/`");
+    expect(source).not.toContain("method.json");
   });
 
   it("types a plural output as a list of the concept, read through wireListOutput", () => {
@@ -583,6 +744,27 @@ describe("renderAction", () => {
     expect(source).toContain("checkFileInputs(DESCRIPTOR, gated.inputs, {");
     expect(source).toContain("prepareInputs({");
   });
+
+  it("sends a bundle-sourced method inline, naming its directory once", () => {
+    const source = renderAction({ ...RECEIPTS_PLAN, files: [], gating: true });
+    expect(source).toContain('import { loadMethodBundles } from "@/lib/loadBundle";');
+    expect(source).toContain('const METHOD_DIR = "receipt-review";');
+    expect(source).toContain("mthds_contents: await loadMethodBundles(METHOD_DIR),");
+    // No manifest and no selector: the bundle is the method.
+    expect(source).not.toContain("MANIFEST");
+    expect(source).not.toContain("method_ref");
+    expect(source).not.toContain("method_id");
+  });
+
+  it("hands prepareInputs the same bundle the run sends, when it takes a file", () => {
+    const source = renderAction(RECEIPTS_PLAN);
+    expect(source).toContain("const bundles = await loadMethodBundles(METHOD_DIR);");
+    expect(source).toContain("files: bundles.map((content) => ({ content })),");
+    expect(source).toContain("mthds_contents: bundles,");
+    expect(source).toContain('const PIPE_REF = "receipt_review.review_receipts";');
+    // Read once per run: prepareInputs and the run options share the one read.
+    expect(source.match(/loadMethodBundles\(/g)).toHaveLength(1);
+  });
 });
 
 describe("renderActionTest", () => {
@@ -601,6 +783,14 @@ describe("renderActionTest", () => {
     expect(source).toContain('import MANIFEST from "@methods/text-stats/method.json";');
     expect(source).toContain("method_ref: MANIFEST.method_ref,");
     expect(source).toContain('pipe_code: "analyze_text",');
+  });
+
+  it("pins the bundle it sends when a bundle-sourced pipe gates on nothing", () => {
+    const source = renderActionTest(RECEIPTS_PLAN);
+    expect(source).toContain('import { loadMethodBundles } from "@/lib/loadBundle";');
+    expect(source).toContain('mthds_contents: await loadMethodBundles("receipt-review"),');
+    expect(source).toContain("prepareInputs.mockResolvedValueOnce(");
+    expect(source).not.toContain("MANIFEST");
   });
 });
 
@@ -634,6 +824,16 @@ describe("renderForm", () => {
     expect(source).toContain('import { useFileInputs } from "@/hooks/useFileInputs";');
     expect(source).toContain("env={{ onDropFile: dropFile, uploadingIds: encodingIds }}");
     expect(source).toContain("{fileError && <ErrorDisplay error={fileError} />}");
+  });
+
+  it("holds the run while a file is encoding — its value is unset until then", () => {
+    // `ready` speaks only for the inputs the gate refuses empty, so an optional
+    // or non-gating file input (a list of receipts) would otherwise run without
+    // the file the person just dropped.
+    const source = renderForm(RECEIPTS_PLAN);
+    expect(source).toContain("disabled={running || encodingIds.size > 0 || !ready}");
+    expect(source).toContain("if (encodingIds.size > 0) return;");
+    expect(renderForm(TEXT_STATS_PLAN)).toContain("disabled={running || !ready}");
   });
 });
 
@@ -694,7 +894,15 @@ describe("runAddMethod", () => {
     } as unknown as Pick<
       PipelexApiClient,
       "codegen" | "validate" | "validateFiles" | "version" | "getMethod"
-    > & { codegen: Mock; validate: Mock; version: Mock; getMethod: Mock };
+    > & { codegen: Mock; validate: Mock; validateFiles: Mock; version: Mock; getMethod: Mock };
+  }
+
+  /** A client answering for the receipt-review bundle, with its recorded responses. */
+  function receiptsClient() {
+    return fakeClient({
+      codegen: vi.fn().mockResolvedValue(RECEIPT_REVIEW_CODEGEN),
+      validateFiles: vi.fn().mockResolvedValue(RECEIPT_REVIEW_VALIDATE),
+    });
   }
 
   function deps(client = fakeClient()) {
@@ -944,6 +1152,131 @@ describe("runAddMethod", () => {
     expect(action).toContain("checkFileInputs(DESCRIPTOR, gated.inputs, {");
     const form = await readFile(path.join(root, "src", "components", "TextStatsForm.tsx"), "utf-8");
     expect(form).toContain("useFileInputs");
+  });
+
+  // ── The bundle arm ──
+
+  it("copies a bundle into methods/<domain>/ and scaffolds it as a files source", async () => {
+    const client = receiptsClient();
+    expect(await runAddMethod([RECEIPTS_DIR], deps(client))).toBe(0);
+
+    expect(await written()).toEqual([
+      "methods/receipt-review/concepts.mthds",
+      "methods/receipt-review/main.mthds",
+      "src/actions/runReceiptReviewPipeline.test.ts",
+      "src/actions/runReceiptReviewPipeline.ts",
+      "src/components/ReceiptReviewForm.tsx",
+      "src/generated/receipt-review/binder.ts",
+      "src/generated/receipt-review/codegen.lock",
+      "src/generated/receipt-review/contracts.ts",
+      "src/generated/receipt-review/sources.json",
+      "src/generated/receipt-review/types.ts",
+      "src/methods.ts",
+      "src/types/receiptReviewPipeline.ts",
+    ]);
+    // Copied byte for byte.
+    expect(await readFile(path.join(root, "methods/receipt-review/main.mthds"), "utf-8")).toBe(
+      await readFile(path.join(RECEIPTS_DIR, "main.mthds"), "utf-8"),
+    );
+    // Sent under the names it was read by, so a diagnostic names the person's file…
+    expect(client.validateFiles.mock.calls[0]![0].map((file: { uri: string }) => file.uri)).toEqual(
+      [path.join(RECEIPTS_DIR, "concepts.mthds"), path.join(RECEIPTS_DIR, "main.mthds")],
+    );
+    // …and recorded under the names it now has, which is what `codegen:check` hashes.
+    const sidecar = JSON.parse(
+      await readFile(path.join(root, "src/generated/receipt-review/sources.json"), "utf-8"),
+    ) as { sources: Record<string, string> };
+    expect(Object.keys(sidecar.sources)).toEqual([
+      "methods/receipt-review/concepts.mthds",
+      "methods/receipt-review/main.mthds",
+    ]);
+    const action = await readFile(
+      path.join(root, "src/actions/runReceiptReviewPipeline.ts"),
+      "utf-8",
+    );
+    expect(action).toContain('const METHOD_DIR = "receipt-review";');
+    expect(client.version).not.toHaveBeenCalled();
+  });
+
+  it("resolves a relative bundle path from the directory the command was typed in", async () => {
+    const client = receiptsClient();
+    const relative = path.relative(REPO_ROOT, RECEIPTS_DIR);
+    expect(await runAddMethod([relative], { ...deps(client), cwd: REPO_ROOT })).toBe(0);
+
+    expect(client.validateFiles.mock.calls[0]![0][0].uri).toBe(
+      path.join(relative, "concepts.mthds"),
+    );
+  });
+
+  it("takes --name for a copied bundle", async () => {
+    expect(await runAddMethod([RECEIPTS_DIR, "--name", "receipts"], deps(receiptsClient()))).toBe(
+      0,
+    );
+    expect(await written()).toContain("methods/receipts/main.mthds");
+    expect(await written()).toContain("src/components/ReceiptsForm.tsx");
+  });
+
+  it("scaffolds a bundle already in methods/ in place, named by its directory", async () => {
+    for (const name of ["concepts.mthds", "main.mthds"]) {
+      await mkdir(path.join(root, "methods/receipts"), { recursive: true });
+      await writeFile(
+        path.join(root, "methods/receipts", name),
+        await readFile(path.join(RECEIPTS_DIR, name), "utf-8"),
+        "utf-8",
+      );
+    }
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((line: unknown) => void lines.push(String(line)));
+
+    const code = await runAddMethod(["methods/receipts/main.mthds"], deps(receiptsClient()));
+
+    expect(code).toBe(0);
+    expect(lines.join("\n")).toContain("in place");
+    const files = await written();
+    expect(files).toContain("src/components/ReceiptsForm.tsx");
+    expect(files.filter((file) => file.startsWith("methods/"))).toEqual([
+      "methods/receipts/concepts.mthds",
+      "methods/receipts/main.mthds",
+    ]);
+  });
+
+  it("refuses a --name that disagrees with the directory a bundle sits in", async () => {
+    await mkdir(path.join(root, "methods/receipts"), { recursive: true });
+    await writeFile(path.join(root, "methods/receipts/main.mthds"), 'domain = "x"\n', "utf-8");
+    const client = receiptsClient();
+
+    expect(await runAddMethod(["methods/receipts", "--name", "other"], deps(client))).toBe(1);
+    expect(client.codegen).not.toHaveBeenCalled();
+  });
+
+  it("refuses to copy a bundle over a method directory that exists, writing nothing", async () => {
+    await mkdir(path.join(root, "methods/receipt-review"), { recursive: true });
+    const before = await written();
+
+    expect(await runAddMethod([RECEIPTS_DIR], deps(receiptsClient()))).toBe(1);
+    expect(await written()).toEqual(before);
+  });
+
+  it("removes everything it wrote when the write half fails, so a re-run succeeds", async () => {
+    // The self-check in the read-only half passes; the orphan pass in the
+    // writer — after the tree's files are on disk — fails.
+    (runCodegenCheck as unknown as Mock)
+      .mockResolvedValueOnce({ drifts: [], isCurrent: true })
+      .mockRejectedValueOnce(new Error("disk went away"));
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation(
+      (line: unknown) => void errors.push(String(line)),
+    );
+    const registryBefore = await readFile(path.join(root, "src/methods.ts"), "utf-8");
+
+    expect(await runAddMethod([RECEIPTS_DIR], deps(receiptsClient()))).toBe(1);
+
+    expect(errors.join("\n")).toContain("everything this run had written was removed");
+    expect(errors.join("\n")).toContain("disk went away");
+    expect(await written()).toEqual(["src/methods.ts"]);
+    expect(await readFile(path.join(root, "src/methods.ts"), "utf-8")).toBe(registryBefore);
+
+    expect(await runAddMethod([RECEIPTS_DIR], deps(receiptsClient()))).toBe(0);
   });
 
   it("refuses a registry whose anchor is gone, before writing anything", async () => {

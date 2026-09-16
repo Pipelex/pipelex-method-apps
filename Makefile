@@ -1,5 +1,26 @@
 .PHONY: help run dev build start port-check lint format format-check typecheck codegen codegen-check codegen-verify add-method test test-watch test-e2e test-e2e-ui confirm-live-e2e agent-test check clean install lock all use-local use-npm ul un
 
+# ── Arguments ──────────────────────────────────────────────────────────────
+# The gestures take their values as make variables (`make add-method
+# METHOD=… NAME=…`) and hand them to a script as flags. Two rules keep that
+# faithful:
+#
+#   - Only a value given on the command line counts. A variable of the same name
+#     exported by the shell (NAME, TITLE and LICENSE all exist in the wild) is
+#     not a request, so `opt` reads a variable's origin before its value.
+#   - The value reaches the script exactly as typed. `shq` wraps it in single
+#     quotes, closing and escaping any quote inside, and `$(value …)` keeps a `$`
+#     in it from being expanded by make, so a title such as `Bob's "$5" app`
+#     arrives intact.
+#
+# `$(call opt,NAME,--name)` expands to `--name '<value>'`, or to nothing.
+shq = '$(subst ','\'',$(1))'
+opt = $(if $(filter command line,$(origin $(1))),$(2) $(call shq,$(value $(1))))
+flag = $(if $(filter command line,$(origin $(1))),$(2))
+# Refuse a gesture run without its required variable. Decided by make from the
+# variable's origin, so the value itself never reaches a shell line unquoted.
+require = @$(if $(filter command line,$(origin $(1))),:,echo "$(2)"; exit 2)
+
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
 
@@ -89,18 +110,32 @@ codegen-check: ## Verify src/generated/ is current, offline (no API key needed)
 codegen-verify: ## Ask the engine whether the committed crates are still current (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
 	npm run codegen:verify
 
-# Scaffolds a method that lives on the platform (a catalog id) or in a published
-# package (an address) into the app: the manifest, the generated tree, the action
-# trio, the narrower, the form and a registry entry. One-shot — it never
+# Scaffolds a method into the app: a bundle (a .mthds file or a directory of
+# them, copied into methods/<name>/ unless it is already there), a method on the
+# platform (a catalog id) or one in a published package (an address). It writes
+# the generated tree, the action trio, the narrower, the form and a registry
+# entry, and the manifest for a method that lives elsewhere. One-shot — it never
 # overwrites, and `npm run codegen` is the refresh. Keyed and online, so it stays
 # out of `make all`. Wants the same base URL as `codegen`, which is also the one
-# that resolves a package address.
-add-method: ## Scaffold a method into the app from METHOD=<mt_… | github.com/owner/repo[/pkg][@tag]> (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
-	@if [ -z "$(METHOD)" ]; then \
-		echo "usage: make add-method METHOD=<mt_… | github.com/owner/repo[/pkg][@tag]> [PIPE=<pipe_code>] [NAME=<dir-name>] [LABEL=<label>] [DRY_RUN=1]"; \
-		exit 2; \
-	fi
-	npm run add-method -- $(METHOD) $(if $(PIPE),--pipe $(PIPE)) $(if $(NAME),--name $(NAME)) $(if $(LABEL),--label "$(LABEL)") $(if $(DRY_RUN),--dry-run)
+# that resolves a package address. A relative bundle path is read from the
+# directory make runs in.
+add-method: ## Scaffold a method into the app from METHOD=<path/to/bundle | mt_… | github.com/owner/repo[/pkg][@tag]> (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
+	$(call require,METHOD,usage: make add-method METHOD=<path/to/bundle | mt_… | github.com/owner/repo[/pkg][@tag]> [PIPE=<pipe_code>] [NAME=<dir-name>] [LABEL=<label>] [DRY_RUN=1])
+	npm run add-method -- $(call shq,$(value METHOD)) $(call opt,PIPE,--pipe) $(call opt,NAME,--name) $(call opt,LABEL,--label) $(call flag,DRY_RUN,--dry-run)
+
+# template-only:begin — the bootstrap removes this block, with the gesture it runs.
+# Turns this template into the app for one method, in one go: scaffolds the
+# method, names the project after it (the bootstrap, run with the derived
+# values), writes .env.local from the shell, re-syncs the lock file, runs
+# `make all`, and removes the bootstrap. One-shot, keyed and online, so it stays
+# out of `make all`; docs/create.md is the reference. A relative bundle path is
+# read from the directory make runs in.
+.PHONY: create
+create: ## Turn this template into the app for METHOD=<path/to/bundle | mt_… | address> (one-shot; needs PIPELEX_API_KEY and, for now, the api-dev base URL)
+	$(call require,METHOD,usage: make create METHOD=<path/to/bundle | mt_… | github.com/owner/repo[/pkg][@tag]> [NAME=<package>] [TITLE=<title>] [DESCRIPTION=<text>] [METHOD_NAME=<dir-name>] [PIPE=<pipe_code>] [LABEL=<label>] [AUTHOR_NAME=…] [AUTHOR_EMAIL=…] [REPO_URL=…] [LICENSE=mit|proprietary|<spdx>] [LICENSE_HOLDER=…] [LICENSE_YEAR=…] [DRY_RUN=1])
+	@[ -d node_modules ] || npm install
+	npm run create -- $(call shq,$(value METHOD)) $(call opt,NAME,--name) $(call opt,TITLE,--title) $(call opt,DESCRIPTION,--description) $(call opt,METHOD_NAME,--method-name) $(call opt,PIPE,--pipe) $(call opt,LABEL,--label) $(call opt,AUTHOR_NAME,--author-name) $(call opt,AUTHOR_EMAIL,--author-email) $(call opt,REPO_URL,--repo-url) $(call opt,LICENSE,--license) $(call opt,LICENSE_HOLDER,--license-holder) $(call opt,LICENSE_YEAR,--license-year) $(call flag,DRY_RUN,--dry-run)
+# template-only:end
 
 test: ## Run tests (single pass)
 	npm run test
