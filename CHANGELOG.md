@@ -19,6 +19,7 @@
 ### Security
 
 - **The web app's servers listen on loopback by default (Breaking)**: `make dev`, `make start`, `npm run dev` and `npm run start` bind `127.0.0.1` instead of every network interface, because anyone who could reach the server ran methods billed to the developer's `PIPELEX_API_KEY`. `APP_HOST`, beside `APP_PORT`, widens it — `make dev APP_HOST=0.0.0.0` for a container or another device — and the Makefile warns whenever a server starts beyond loopback.
+- **Next.js 16.3.5**: the web app template requires `next` and `eslint-config-next` at `^16.3.5` and locks 16.3.5, past the two critical remote-code-execution advisories that affect every Next.js 16 release before 16.3.3 (GHSA-p293-qw3h-jr36, GHSA-2xp9-vwfh-vxw4). The lock also takes the patched `vitest`, `sharp`, `browserslist` and `js-yaml`, so `npm audit` reports nothing.
 
 ## [v0.1.0] - 2026-09-16
 
