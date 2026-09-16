@@ -39,6 +39,7 @@ import {
   parseArgs,
   parseMethodArg,
   pascalCase,
+  planAddMethod,
   readBundle,
   registerMethod,
   renderManifest,
@@ -47,6 +48,7 @@ import {
   scaffoldPaths,
   slugSource,
   TABS_ANCHOR,
+  writeAddMethod,
   type ScaffoldPlan,
 } from "./add-method.mts";
 import { renderAction, renderActionTest, renderAdapter, renderForm } from "./add-method.mts";
@@ -122,6 +124,14 @@ describe("parseMethodArg", () => {
   ])("refuses %s (%s)", (arg) => {
     expect(() => parseMethodArg(arg)).toThrow(AddMethodError);
   });
+
+  // A name that exists is a path, whatever the selector grammar would make of it.
+  it.each(["bundles.v2/cv", "my.org/methods/cv", "mt_drafts", "github.com/o/r"])(
+    "reads %s as a bundle path when it exists on disk",
+    (arg) => {
+      expect(parseMethodArg(arg, (value) => value === arg)).toEqual({ kind: "bundle", path: arg });
+    },
+  );
 });
 
 describe("looksLikePath", () => {
@@ -1271,12 +1281,128 @@ describe("runAddMethod", () => {
 
     expect(await runAddMethod([RECEIPTS_DIR], deps(receiptsClient()))).toBe(1);
 
-    expect(errors.join("\n")).toContain("everything this run had written was removed");
+    expect(errors.join("\n")).toContain("everything this run had created was removed");
     expect(errors.join("\n")).toContain("disk went away");
     expect(await written()).toEqual(["src/methods.ts"]);
     expect(await readFile(path.join(root, "src/methods.ts"), "utf-8")).toBe(registryBefore);
 
     expect(await runAddMethod([RECEIPTS_DIR], deps(receiptsClient()))).toBe(0);
+  });
+
+  it("leaves a method directory another run created after the plan, and its files", async () => {
+    const plan = await planAddMethod(
+      { method: RECEIPTS_DIR, dryRun: false },
+      deps(receiptsClient()),
+    );
+    // Between the plan and the write, another run claims the same directory.
+    const foreign = path.join(root, "methods/receipt-review");
+    await mkdir(foreign, { recursive: true });
+    await writeFile(path.join(foreign, "main.mthds"), 'domain = "theirs"\n', "utf-8");
+    await writeFile(path.join(foreign, "NOTES.txt"), "not this run's\n", "utf-8");
+
+    await expect(writeAddMethod(plan, deps(receiptsClient()))).rejects.toThrow(AddMethodError);
+
+    expect(await written()).toEqual([
+      "methods/receipt-review/NOTES.txt",
+      "methods/receipt-review/main.mthds",
+      "src/methods.ts",
+    ]);
+    expect(await readFile(path.join(foreign, "main.mthds"), "utf-8")).toBe('domain = "theirs"\n');
+  });
+
+  it("refuses a generated tree that appeared after the plan, and leaves it", async () => {
+    const plan = await planAddMethod(
+      { method: RECEIPTS_DIR, dryRun: false },
+      deps(receiptsClient()),
+    );
+    const tree = path.join(root, "src/generated/receipt-review");
+    await mkdir(tree, { recursive: true });
+    await writeFile(path.join(tree, "types.ts"), "// theirs\n", "utf-8");
+
+    await expect(writeAddMethod(plan, deps(receiptsClient()))).rejects.toThrow(
+      "appeared after the plan was made",
+    );
+
+    expect(await written()).toEqual(["src/generated/receipt-review/types.ts", "src/methods.ts"]);
+    expect(await readFile(path.join(tree, "types.ts"), "utf-8")).toBe("// theirs\n");
+  });
+
+  it("names the regenerated tree it keeps when an in-place scaffold fails", async () => {
+    await mkdir(path.join(root, "methods/receipts"), { recursive: true });
+    for (const name of ["concepts.mthds", "main.mthds"]) {
+      await writeFile(
+        path.join(root, "methods/receipts", name),
+        await readFile(path.join(RECEIPTS_DIR, name), "utf-8"),
+        "utf-8",
+      );
+    }
+    await mkdir(path.join(root, "src/generated/receipts"), { recursive: true });
+    await writeFile(path.join(root, "src/generated/receipts/types.ts"), "// stale\n", "utf-8");
+    const plan = await planAddMethod(
+      { method: "methods/receipts", dryRun: false },
+      deps(receiptsClient()),
+    );
+    // An app file appears after the plan, so the write half fails after the tree.
+    const appFile = plan.emitted.find((file) => file.relative !== plan.paths.registry)!;
+    await writeFile(path.join(root, appFile.relative), "// theirs\n", "utf-8");
+
+    const failure = writeAddMethod(plan, deps(receiptsClient()));
+
+    await expect(failure).rejects.toThrow("src/generated/receipts/, which existed before");
+    await expect(failure).rejects.toThrow("regenerated in place");
+    const files = await written();
+    expect(files).toContain("src/generated/receipts/types.ts");
+    expect(files).toContain(appFile.relative);
+    expect(files.filter((file) => file.startsWith("src/components/"))).toEqual([]);
+    expect(await readFile(path.join(root, "src/generated/receipts/types.ts"), "utf-8")).not.toBe(
+      "// stale\n",
+    );
+  });
+
+  it("scaffolds a directory whose name reads like an address when it exists", async () => {
+    const dotted = path.join(root, "bundles.v2/receipt-review");
+    await mkdir(dotted, { recursive: true });
+    for (const name of ["concepts.mthds", "main.mthds"]) {
+      await writeFile(
+        path.join(dotted, name),
+        await readFile(path.join(RECEIPTS_DIR, name), "utf-8"),
+        "utf-8",
+      );
+    }
+
+    expect(await runAddMethod(["bundles.v2/receipt-review"], deps(receiptsClient()))).toBe(0);
+    expect(await written()).toContain("methods/receipt-review/main.mthds");
+  });
+
+  it("refuses a catalog id the API does not know, naming it, with no stack", async () => {
+    const client = fakeClient({
+      getMethod: vi
+        .fn()
+        .mockRejectedValueOnce(
+          new ApiResponseError(
+            "API GET /v1/methods/mt_missing failed (404)",
+            "https://api.example/v1/methods/mt_missing",
+            404,
+            "Not Found",
+            "{}",
+            "MethodNotFoundError",
+            "Method mt_missing not found",
+            undefined,
+            undefined,
+          ),
+        ),
+    });
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation(
+      (line: unknown) => void errors.push(String(line)),
+    );
+
+    expect(await runAddMethod(["mt_missing"], deps(client))).toBe(1);
+
+    expect(errors.join("\n")).toContain("could not resolve");
+    expect(errors.join("\n")).toContain("Method mt_missing not found");
+    expect(errors.join("\n")).not.toMatch(/\n\s+at /);
+    expect(await written()).toEqual(["src/methods.ts"]);
   });
 
   it("refuses a registry whose anchor is gone, before writing anything", async () => {

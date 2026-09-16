@@ -37,7 +37,8 @@
  * point it at a temporary copy of the tree. The two halves are exported
  * separately, so a caller can plan, act on the plan, and only then write.
  */
-import { access, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { access, mkdir, readFile, rm, rmdir, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -56,7 +57,7 @@ import {
   type ValidateMethodSelector,
 } from "@pipelex/sdk";
 
-import { assertSelectorSupport } from "./api.mts";
+import { assertSelectorSupport, explainSelectorFailure } from "./api.mts";
 import { fetchGenerated, writeGenerated, type FetchedMethod } from "./generate.mts";
 import {
   assertSecureBaseUrl,
@@ -141,6 +142,12 @@ export function looksLikePath(value: string): boolean {
 /**
  * Parse the one `METHOD` argument.
  *
+ * `onDisk` answers whether the argument names something that exists, and a
+ * name that does is a path whatever it looks like: `bundles.v2/cv` has a dot in
+ * its first segment and `mt_drafts` the catalog prefix, and both are ordinary
+ * directory names. Only a name that exists nowhere falls through to the
+ * selector grammar.
+ *
  * A selector comes back as the SDK's own type, which is what `validate`,
  * `codegen`, `prepareInputs`, the manifest and the scaffolded action's
  * `buildOptions` all take, so it is parsed once here and carried unchanged
@@ -152,9 +159,13 @@ export function looksLikePath(value: string): boolean {
  * `github.com/<owner>/<repo>[/<subpath>…][@<tag>]`, with an optional
  * `https://` prefix that is normalized away.
  */
-export function parseMethodArg(arg: string): MethodArg {
+export function parseMethodArg(
+  arg: string,
+  onDisk: (value: string) => boolean = () => false,
+): MethodArg {
   const trimmed = arg.trim();
   if (trimmed === "") throw new AddMethodError(`METHOD is empty — pass ${METHOD_ARG_FORMS}.`);
+  if (onDisk(trimmed)) return { kind: "bundle", path: trimmed };
 
   if (trimmed.startsWith("mt_")) {
     if (!METHOD_ID_PATTERN.test(trimmed)) {
@@ -1603,7 +1614,9 @@ export async function planAddMethod(
     );
   }
 
-  const arg = parseMethodArg(args.method);
+  const arg = parseMethodArg(args.method, (value) =>
+    existsSync(path.resolve(deps.cwd ?? repoRoot, expandHome(value))),
+  );
   let catalog: CatalogEntry | null = null;
   let methodFiles: EmittedFile[];
   let fetched: FetchedMethod | null;
@@ -1628,7 +1641,14 @@ export async function planAddMethod(
     // A stored method's catalog name is both the slug's source and the default
     // label — a person chose it. A published address has no such name.
     if (selectorKind(selector) === "method_id") {
-      const method = await client.getMethod(selector.method_id!);
+      let method;
+      try {
+        method = await client.getMethod(selector.method_id!);
+      } catch (error) {
+        const explained = explainSelectorFailure(error, selector);
+        if (explained !== null) throw new AddMethodError(explained);
+        throw error;
+      }
       catalog = { name: method.name, description: method.description ?? null };
       warnings.push(
         "a method_id is scoped to your key's organization, so `npm run codegen` on this " +
@@ -1843,19 +1863,42 @@ function plannedPaths(plan: AddMethodPlan): string[] {
  * files and the registry edit, in that order — and on any failure removes what
  * it created and restores the registry, then rethrows as a refusal saying so.
  * What existed before the gesture (a bundle scaffolded in place, its
- * regenerated tree) is left where it was.
+ * regenerated tree) is left where it was, and the refusal says which.
+ *
+ * "Created" is taken literally: a directory is recorded only when this run's
+ * own `mkdir` made it, and removed only once it is empty again, so a file
+ * another run put there meanwhile survives the rollback. The one directory
+ * removed with its contents is a generated tree this run made, whose files
+ * `writeGenerated` writes without naming them here.
  */
 export async function writeAddMethod(plan: AddMethodPlan, deps: AddMethodDeps): Promise<void> {
   const inRepo = (relative: string): string => path.join(deps.repoRoot, relative);
   const { paths } = plan;
-  const created: string[] = [];
+  const created: { target: string; kind: "file" | "dir" | "tree" }[] = [];
   let registryWritten = false;
+  // An in-place bundle's tree may already exist: the run rewrites it rather
+  // than creating it, so the rollback cannot take it back, only report it.
+  let rewriting = false;
+  let regenerated = false;
+
+  // `mkdir` names the outermost directory it made, so everything from there
+  // down to `dir` is this run's, and nothing above it is.
+  const makeDir = async (dir: string, kind: "dir" | "tree" = "dir"): Promise<void> => {
+    const first = await mkdir(dir, { recursive: true });
+    if (first === undefined) return;
+    const chain: string[] = [];
+    for (let current = dir; ; current = path.dirname(current)) {
+      chain.unshift(current);
+      if (current === first || current === path.dirname(current)) break;
+    }
+    for (const target of chain) created.push({ target, kind: target === dir ? kind : "dir" });
+  };
 
   // Create-only: a file that appeared since the plan is refused, never
   // replaced — and, never having been this run's, never removed either.
   const writeNew = async (relative: string, content: string): Promise<void> => {
     const target = inRepo(relative);
-    await mkdir(path.dirname(target), { recursive: true });
+    await makeDir(path.dirname(target));
     try {
       await writeFile(target, content, { encoding: "utf-8", flag: "wx" });
     } catch (error) {
@@ -1864,19 +1907,28 @@ export async function writeAddMethod(plan: AddMethodPlan, deps: AddMethodDeps): 
       }
       throw error;
     }
-    created.push(target);
+    created.push({ target, kind: "file" });
   };
 
   try {
     if (!plan.inPlace) {
-      await mkdir(inRepo(paths.methodDir), { recursive: true });
-      created.push(inRepo(paths.methodDir));
+      await makeDir(inRepo(paths.methodDir));
       for (const file of plan.methodFiles) await writeNew(file.relative, file.content);
     }
 
     const outDir = inRepo(paths.generatedDir);
-    if (!(await exists(outDir))) created.push(outDir);
+    const recorded = created.length;
+    await makeDir(outDir, "tree");
+    if (created.length === recorded) {
+      if (!plan.inPlace) {
+        throw new AddMethodError(
+          `${paths.generatedDir}/ appeared after the plan was made — run the gesture again.`,
+        );
+      }
+      rewriting = true;
+    }
     await writeGenerated(outDir, plan.fetched, plan.methodSource);
+    regenerated = rewriting;
 
     for (const file of plan.emitted) {
       if (file.relative !== paths.registry) await writeNew(file.relative, file.content);
@@ -1891,11 +1943,21 @@ export async function writeAddMethod(plan: AddMethodPlan, deps: AddMethodDeps): 
     registryWritten = true;
     await writeFile(inRepo(paths.registry), registry.content, "utf-8");
   } catch (error) {
-    for (const target of created.reverse()) await rm(target, { recursive: true, force: true });
+    for (const { target, kind } of created.reverse()) {
+      if (kind === "dir") await rmdir(target).catch(() => {});
+      else await rm(target, { recursive: kind === "tree", force: true });
+    }
     if (registryWritten) await writeFile(inRepo(paths.registry), plan.registryBefore, "utf-8");
     const reason = error instanceof Error ? error.message : String(error);
+    const kept = regenerated
+      ? ` — except ${paths.generatedDir}/, which existed before and was regenerated in place; ` +
+        "it is kept, exactly as `npm run codegen` writes it for these sources"
+      : rewriting
+        ? ` — except ${paths.generatedDir}/, which existed before and may be partly rewritten; ` +
+          "`npm run codegen` regenerates it whole"
+        : "";
     throw new AddMethodError(
-      `writing the slice failed, and everything this run had written was removed: ${reason}`,
+      `writing the slice failed, and everything this run had created was removed${kept}: ${reason}`,
     );
   }
 }
