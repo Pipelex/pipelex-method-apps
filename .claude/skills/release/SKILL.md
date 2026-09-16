@@ -49,7 +49,7 @@ Run in the worktree, in this order, before the commit. Every one of them is bloc
 
 ## CI on the release pull request
 
-The repo has two workflows and both fire on `on: pull_request:` with no branch and no path filter, so the release pull request meets exactly what every pull request meets:
+Two of the repo's workflows fire on `on: pull_request:` with no branch and no path filter, so the release pull request meets exactly what every pull request meets; the third, `create-live.yml`, runs only when someone starts it by hand and never on a pull request:
 
 - **`lint-check.yml`** — `npm ci` then `make check` on Node 22.
 - **`tests-check.yml`** — `npm ci`, then `make agent-test`, then `make build`, on the same Node.
