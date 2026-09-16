@@ -72,7 +72,7 @@ A failure after step 1 cannot be undone by running the gesture again, because th
 `.env.local` is written only when it does not exist, from `.env.example`. Next.js reads it before every other env file, and the first file that assigns a variable wins even when the value is empty, so the gesture writes it such that it hides nothing another file supplies:
 
 - **exactly one `PIPELEX_BASE_URL` line**, holding the base URL the gesture ran against — the one your shell exports, the one an env file such as `.env` sets, or the default when neither does. Any other assignment of it is dropped, so the file can never hold two;
-- **`PIPELEX_API_KEY`** set to the value your shell exports. When the key came from another env file instead, `.env.local` carries no `PIPELEX_API_KEY` line at all, only a comment naming that file, so the file keeps supplying it and the secret is not copied a second time.
+- **`PIPELEX_API_KEY`** set to the value your shell exports. When the key came from another env file instead, `.env.local` carries no `PIPELEX_API_KEY` line at all, only a comment naming that file, so the file keeps supplying it and the secret is not copied a second time. The gesture reads the env files a production build reads, as every script here does, so that file can be `.env.production` or `.env.production.local`, which `make dev` never opens. In that case the comment and the plan say that the dev server will not see the key, and tell you to put it in `.env` or `.env.development.local` before `make dev`.
 
 The file is created readable by you alone. An existing `.env.local` is yours and is never touched; when your shell exports a base URL the file disagrees with, the plan says so, because the app reads the file whenever the shell does not set the variable.
 

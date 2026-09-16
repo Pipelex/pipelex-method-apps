@@ -307,6 +307,26 @@ export function dropEnvLine(text: string, key: string, comment: string): string 
   return `${kept.join("\n")}\n`;
 }
 
+/** The env files `next dev` reads, `.env.local` among them. */
+const DEV_SERVER_ENV_FILES: ReadonlySet<string> = new Set([
+  ".env.development.local",
+  ".env.local",
+  ".env.development",
+  ".env",
+]);
+
+/**
+ * Whether `make dev` reads this env file. The gesture loads the files a
+ * production build reads, as every script here does, so a value can come from
+ * `.env.production` or `.env.production.local`, which the dev server never opens.
+ */
+export function devServerReads(file: string): boolean {
+  return DEV_SERVER_ENV_FILES.has(path.basename(file));
+}
+
+/** Where the dev server can find a key that only a production build reads. */
+const DEV_KEY_HINT = "put it in .env or .env.development.local before `make dev`";
+
 /**
  * The env file, written from the example. `.env.local` is read before every
  * other env file and its first assignment wins even when empty, so it must not
@@ -322,11 +342,11 @@ export function renderEnvFile(example: string | null, values: EnvValues): string
   if (values.key !== undefined) {
     text = setEnvLine(text, API_KEY_KEY, values.key);
   } else if (values.keyFile !== undefined) {
-    text = dropEnvLine(
-      text,
-      API_KEY_KEY,
-      `${API_KEY_KEY} is read from ${values.keyFile}; a line here would override it.`,
-    );
+    const comment = devServerReads(values.keyFile)
+      ? `${API_KEY_KEY} is read from ${values.keyFile}; a line here would override it.`
+      : `${API_KEY_KEY} is read from ${values.keyFile} by a production build only — ` +
+        `${DEV_KEY_HINT}. A line here would override it.`;
+    text = dropEnvLine(text, API_KEY_KEY, comment);
   }
   return text;
 }
@@ -371,9 +391,12 @@ export async function planEnvFile(
   const keyNote =
     shell.key !== undefined
       ? `, and ${API_KEY_KEY} from your shell.`
-      : keyFile !== undefined
-        ? `, and no ${API_KEY_KEY} line: the key stays in ${keyFile}, which a line here would hide.`
-        : `, and an empty ${API_KEY_KEY} — set one before \`make dev\`.`;
+      : keyFile === undefined
+        ? `, and an empty ${API_KEY_KEY} — set one before \`make dev\`.`
+        : devServerReads(keyFile)
+          ? `, and no ${API_KEY_KEY} line: the key stays in ${keyFile}, which a line here would hide.`
+          : `, and no ${API_KEY_KEY} line: the key stays in ${keyFile}, which only a production ` +
+            `build reads — ${DEV_KEY_HINT}.`;
   const notes = [
     `${ENV_FILE} is written with ${BASE_URL_KEY}=${effectiveBaseUrl} (${baseOrigin})${keyNote}`,
   ];

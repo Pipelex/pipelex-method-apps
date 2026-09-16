@@ -29,6 +29,7 @@ import {
   ENV_FILE,
   oneLine,
   parseCreateArgs,
+  devServerReads,
   planEnvFile,
   renderEnvFile,
   runCreate,
@@ -243,6 +244,30 @@ describe("the env file", () => {
     );
     expect(written).not.toMatch(/^\s*(export\s+)?PIPELEX_API_KEY\s*=/m);
     expect(dropEnvLine("A=1\nexport A=2\nB=3\n", "A", "gone")).toBe("# gone\nB=3\n");
+  });
+
+  it("does not claim the dev server reads a key only a production build reads", async () => {
+    expect(devServerReads(".env")).toBe(true);
+    expect(devServerReads(".env.development.local")).toBe(true);
+    expect(devServerReads(".env.production")).toBe(false);
+    expect(devServerReads(".env.production.local")).toBe(false);
+
+    const written = renderEnvFile(EXAMPLE, { baseUrl: DEV, keyFile: ".env.production.local" });
+    expect(written).not.toMatch(/^\s*(export\s+)?PIPELEX_API_KEY\s*=/m);
+    expect(written).toContain(
+      "# PIPELEX_API_KEY is read from .env.production.local by a production build only — " +
+        "put it in .env or .env.development.local before `make dev`.",
+    );
+
+    const root = await mkdtemp(path.join(tmpdir(), "create-env-"));
+    try {
+      const plan = await planEnvFile(root, {}, DEV, { key: ".env.production.local" });
+      const notes = plan.notes.join("\n");
+      expect(notes).toContain("which only a production build reads");
+      expect(notes).not.toContain("which a line here would hide");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("writes exactly one base URL line, whatever the example held", () => {
