@@ -21,7 +21,7 @@ cd my-app && git init
 export PIPELEX_API_KEY=…                               # from app.pipelex.com
 export PIPELEX_BASE_URL=https://api-dev.pipelex.com    # for now, see the template's README
 make create METHOD=path/to/my_method.mthds
-make dev                                               # http://localhost:4300
+make dev                                               # http://127.0.0.1:4300
 ```
 
 `METHOD` is a `.mthds` file or a directory of them, a method id from your organization's catalog (`mt_…`), or a published package address. The template's own [README](webapp-js/README.md) and [`docs/create.md`](webapp-js/docs/create.md) say what the gesture does and how to override what it derives.

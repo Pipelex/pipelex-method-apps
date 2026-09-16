@@ -324,6 +324,20 @@ export function devServerReads(file: string): boolean {
   return DEV_SERVER_ENV_FILES.has(path.basename(file));
 }
 
+/**
+ * The URL `make dev` will answer on, read from the `APP_HOST` and `APP_PORT`
+ * the Makefile exports, with the scripts' own fallbacks for a missing or blank
+ * value. A wildcard bind answers on loopback, and an IPv6 address needs
+ * brackets. `playwright.config.ts` derives its base URL the same way.
+ */
+export function appUrl(env: NodeJS.ProcessEnv): string {
+  const host = env.APP_HOST?.trim() || "127.0.0.1";
+  const port = env.APP_PORT?.trim() || "4300";
+  const urlHost =
+    host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host.includes(":") ? `[${host}]` : host;
+  return `http://${urlHost}:${port}`;
+}
+
 /** Where the dev server can find a key that only a production build reads. */
 const DEV_KEY_HINT = "put it in .env or .env.development.local before `make dev`";
 
@@ -659,7 +673,7 @@ async function runCreateInner(argv: readonly string[], given?: CreateDeps): Prom
       "Nothing is committed: review with `git status` and `git diff`, then commit.",
       "",
       "Next:",
-      `  make dev                  # http://localhost:${process.env.APP_PORT ?? "4300"}`,
+      `  make dev                  # ${appUrl(process.env)}`,
       "  make add-method METHOD=…  # a second method, as a tab beside the first",
       "  npm run codegen           # after editing the method, or bumping its tag",
     ].join("\n"),

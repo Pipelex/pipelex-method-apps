@@ -19,7 +19,7 @@ cd my-app && git init
 export PIPELEX_API_KEY=…                               # from app.pipelex.com
 export PIPELEX_BASE_URL=https://api-dev.pipelex.com    # for now — see below
 make create METHOD=path/to/my_method.mthds
-make dev                                               # http://localhost:4300
+make dev                                               # http://127.0.0.1:4300
 ```
 
 `METHOD` is a `.mthds` file or a directory of them, a method id from your organization's catalog (`mt_…`, from [app.pipelex.com](https://app.pipelex.com)), or a published package address (`github.com/Pipelex/methods/text_stats@v0.1.1`).
@@ -68,11 +68,22 @@ The command refuses rather than overwriting a slice that already exists, and `DR
 
 A variable already exported in your shell wins over `.env.local`.
 
+## Where the app listens
+
+`make dev` and `make start` listen on `127.0.0.1:4300`, which only this machine can reach. That is deliberate. The app's Server Actions run methods with the `PIPELEX_API_KEY` in the server's environment, and nothing authenticates the browser that calls them, so anyone who can reach the server runs methods billed to your key. Two variables change it, on the command line or from the shell:
+
+| Variable   | Purpose                                                                                          | Default     |
+| ---------- | ------------------------------------------------------------------------------------------------ | ----------- |
+| `APP_HOST` | The interface the server binds. `0.0.0.0` opens it to your network.                              | `127.0.0.1` |
+| `APP_PORT` | The port, to run a second checkout beside one that already holds 4300: `make dev APP_PORT=4301`. | `4300`      |
+
+Widen the host only on a network you trust, for a container or to open the app on another device: `make dev APP_HOST=0.0.0.0`. The Makefile prints a warning each time a server starts beyond loopback. `npm run dev` and `npm run start` read the same two variables and fall back to the same defaults.
+
 ## Make targets
 
 | Target                | Purpose                                                                                                                             |
 | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `make dev`            | Start the Next.js dev server on port 4300                                                                                           |
+| `make dev`            | Start the Next.js dev server on `127.0.0.1:4300` — see [Where the app listens](#where-the-app-listens)                              |
 | `make build`          | Production build                                                                                                                    |
 | `make create`         | Turn the template into the app for one method — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                             |
 | `make add-method`     | Scaffold a method into the app — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                                            |

@@ -5,7 +5,7 @@ A fresh copy of this template is an app with no method, under the template's own
 ```bash
 PIPELEX_API_KEY=… PIPELEX_BASE_URL=https://api-dev.pipelex.com \
   make create METHOD=path/to/my_method.mthds
-make dev   # http://localhost:4300
+make dev   # http://127.0.0.1:4300
 ```
 
 When it finishes, the page is your method's input form and result view, the project is named after the method, `.env.local` points at the API the gesture ran against, and `make all` is green. Nothing is committed: the whole result is a working-tree change for you to review.
