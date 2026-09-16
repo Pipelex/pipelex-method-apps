@@ -4,7 +4,7 @@ This is the reference for the code-generation workflow behind `src/generated/` �
 
 ## Why
 
-This template's role is to show developers how to build on Pipelex, and everything our tools can build deterministically should be built by them. Before codegen, the template hand-wrote in `src/types/` the very thing each method already declares in its `.mthds` bundle: the output concept's shape plus a hand-rolled runtime narrower per shape. That is a duplicated type surface with no drift guard — edit a bundle's structure and nothing tells you the TypeScript is now lying.
+Everything our tools can build deterministically should be built by them. Before codegen, the gallery this template was extracted from, `pipelex-starter-js`, hand-wrote in `src/types/` the very thing each method already declares in its `.mthds` bundle: the output concept's shape plus a hand-rolled runtime narrower per shape. That is a duplicated type surface with no drift guard — edit a bundle's structure and nothing tells you the TypeScript is now lying.
 
 `@pipelex/sdk` exposes the crate routes: `client.codegen({ kind: "types", target: "ts-zod" })` projects a method's normalized library crate into stamped typed artifacts — a `types.ts` (zod schemas + inferred types), a `binder.ts` (typed `parse<Name>` / `serialize<Name>` pairs), and a `codegen.lock` — byte-identical to a local `pipelex codegen types` run. The same run additionally asks `/v1/validate` for the method's pipe IO contracts and **both** of its wire form descriptors (opting in with `views: ["input_form", "output_form"]`) and writes a `contracts.ts` (see [The contracts artifact](#the-contracts-artifact)), so one command keeps the output types, the input forms and the result view honest together. The SDK also ships `runCodegenCheck`, the pure offline drift check: a port of pipelex's `codegen check` that reaches the same verdict over the same bytes, down to the drift `detail` sentences.
 
@@ -73,7 +73,7 @@ What actually differs is two calls. For a bundle source, `validateFiles(files, {
 
 Two consequences worth stating plainly. A **`method_id`** slice regenerates only with a key of the same organization, since the catalog is org-scoped — which is why a published address is the portable form. And a selector is resolved **server-side**, so the base URL has to forward it; see the handshake below.
 
-[`docs/add-method.md`](add-method.md) is the reference for the gesture that writes a manifest and the app files around it.
+[`docs/add-method.md`](add-method.md) is the reference for the gesture that adds a method of either kind — it copies a bundle into `methods/<name>/` or writes a manifest there — and writes the app files around it.
 
 **Committed, deliberately.** A template consumer must see the generated code without holding an API key, `git clone && make all` must pass keyless, and the diff of a regeneration is itself documentation of what a bundle edit changed. The offline check keeps the committed tree honest.
 
@@ -138,7 +138,7 @@ Each `parseXxx(results: RunResults)` narrower in `src/types/` hands `wireOutput(
 
 ## What is deliberately not built
 
-- **The manifest is the whole of the selector story on this side.** `method.json` names where a method lives and nothing else; the scripts gained a second source kind and no second regeneration path, no download-the-closure-locally mode, and no per-kind gate. Everything else the selector makes possible — the app files, the registry entry — belongs to [`make add-method`](add-method.md), not here.
+- **The manifest is the whole of the selector story on this side.** `method.json` names where a method lives and nothing else; the scripts gained a second source kind and no second regeneration path, no download-the-closure-locally mode, and no per-kind gate. Everything around a method's generated tree, for either kind — the app files, the registry entry — belongs to [`make add-method`](add-method.md), not here.
 - **No `resolve` example.** Codegen subsumes it for this template's purpose; the bare crate becomes interesting only for fingerprint-based caching or a custom projection.
 - **No generated-code edits, ever.** Customization rides sibling extension files; the adapters in `src/types/` _are_ that sibling layer here.
 - **No watch mode, no build-time hook.** Regeneration stays an explicit dev action; wiring it into `next dev` or `next build` would put a network + key dependency inside the build. The sidecar check is the forgetting-guard.

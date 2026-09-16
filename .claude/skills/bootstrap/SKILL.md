@@ -1,6 +1,6 @@
 ---
 name: bootstrap
-description: Bootstrap this pipelex-method-app template into a real project — names the package, writes the app's title and description into src/site.ts, renders the project's own README, sets author, repo URL and license, resets the version and changelog, removes the template's release skill, then syncs package-lock.json and runs the checks. Use this right after creating a repo from the template, or whenever the user says "bootstrap", "set up this template", "rename the project", "initialize the project", "replace the placeholders", "give this project a name", or "make this my own".
+description: Bootstrap this pipelex-method-app template into a real project — names the package, writes the app's title and description into src/site.ts, renders the project's own README, sets author, repo URL and license, resets the version and changelog, removes what only the template needs (its release skill and the make create gesture), then syncs package-lock.json and runs the checks. Use this right after creating a repo from the template, or whenever the user says "bootstrap", "set up this template", "rename the project", "initialize the project", "replace the placeholders", "give this project a name", or "make this my own".
 ---
 
 # Bootstrap Workflow
@@ -8,6 +8,8 @@ description: Bootstrap this pipelex-method-app template into a real project — 
 This repo is a GitHub **template**. A fresh copy still carries the template's identity: the npm package name `pipelex-method-app` (in `package.json`, `package-lock.json`, and the headings of `CLAUDE.md` and `AGENTS.md`), the display title `Pipelex Method App` and the template's description (in `src/site.ts`, which the page heading, the browser title and the meta description all read), a README about the template, a changelog chronicling the template, the template's MIT license, and a `release` skill that releases the template from inside the Pipelex workspace. This skill turns all of that into the user's project identity in one reviewable pass, then proves the result still passes CI's gates. It adds no method; `make add-method` does that afterwards.
 
 The mechanical part is done by a bundled script, `scripts/bootstrap.mjs`. It is deterministic, needs nothing beyond Node and the repo's own Prettier, and supports `--dry-run`, so you can show the plan before touching anything. **Your job in this skill is to collect good inputs, preview, run the script, and verify.** Walk the user through it; confirm before the steps that change files.
+
+**`make create` runs this same workflow with no conversation at all.** `make create METHOD=<method>` derives the package name, title and description from the method, adds the method, runs this script with those values and `--clean` (a `--dry-run` first, to check them), writes `.env.local`, re-syncs `package-lock.json`, runs `make all`, and removes this skill once the checks are green — Steps 3 to 6 below, in one command that refuses rather than asks. [`docs/create.md`](../../../docs/create.md) is its reference. When the user already has the method and wants the app, point them to it, or run it for them. This skill is the path for naming the project first and adding a method afterwards, or for choosing each value with the user.
 
 ## Step 1 — Preflight
 
@@ -82,10 +84,11 @@ Re-run the exact same command **without** `--dry-run`. The script:
 - writes the title and description into `src/site.ts`
 - applies the license choice to `LICENSE`
 - rewrites `CHANGELOG.md` to a fresh `v0.1.0` entry dated today
-- removes `.claude/skills/release/`, which releases the template and means nothing in a project
+- removes what only the template needs: `.claude/skills/release/`, which releases the template from inside the Pipelex workspace, and the `make create` gesture — `scripts/create.mts`, `scripts/lib/create.mts` and its test, `docs/create.md` and `.github/workflows/create-live.yml` — and drops the `create` script from `package.json`
+- strips the template-only passages, which describe that gesture, from the `Makefile`, `CLAUDE.md`, `AGENTS.md` and `docs/ci.md`: each passage sits between a `template-only:begin` line and a `template-only:end` line, and goes with both of them
 - formats every file it writes with the repo's Prettier
 
-It deliberately does **not** touch git, run `npm install`, run the checks, add a method, or modify `.github/`, `node_modules/`, `package-lock.json`, `methods/` or `src/generated/`. It also does not remove this skill; Step 6 does.
+It deliberately does **not** touch git, run `npm install`, run the checks, add a method, or modify `node_modules/`, `package-lock.json`, `methods/` or `src/generated/`; in `.github/` it removes the create workflow and changes nothing else. It also does not remove this skill; Step 6 does.
 
 **Heads-up — file state changed on disk.** If you need a manual `Edit` afterward, **re-read the file first** — a pre-run read is stale, and an `Edit` against it fails with "modified since read." The script is meant to cover every placeholder, so a manual edit is a sign the script should handle that case instead.
 
@@ -117,7 +120,7 @@ Finally, give the user a short summary:
 - that the version was reset to `0.1.0`, `CHANGELOG.md` restarted and `README.md` rewritten for the project
 - that `package-lock.json` was re-synced and `make all` passes
 - that **nothing is committed and nothing is staged** — they should review with `git status` and `git diff`, then commit when ready
-- that the app has no method yet, and the page says so: the next step is `make add-method METHOD=<method>`, where the method is a published package address or a catalog id from [app.pipelex.com](https://app.pipelex.com), with `PIPELEX_API_KEY` set in `.env.local`. [`docs/add-method.md`](../../../docs/add-method.md) is the reference. Offer to run it with them.
+- that the app has no method yet, and the page says so: the next step is `make add-method METHOD=<method>`, where the method is a path to a `.mthds` file or to a directory of them (copied into `methods/<name>/`), a catalog id from [app.pipelex.com](https://app.pipelex.com), or a published package address. It needs `PIPELEX_API_KEY` in `.env.local` and, until the production API serves the form views codegen needs, `PIPELEX_BASE_URL=https://api-dev.pipelex.com`. [`docs/add-method.md`](../../../docs/add-method.md) is the reference. Offer to run it with them.
 
 ## Rules
 
@@ -125,5 +128,5 @@ Finally, give the user a short summary:
 - **Always dry-run before the real run.** When the user supplied every input up front and asked to proceed, the dry-run output still gets shown.
 - **Re-sync `package-lock.json`.** Renaming the package makes the lock stale; `npm install --package-lock-only` is what keeps CI's `npm ci` green.
 - **Don't stop on a red check.** A failing `make all` here means CI will fail too — fix the root cause and re-run.
-- **Don't touch `.github/` workflows.** They are generic to any project created from the template.
+- **Don't edit `.github/` workflows.** The ones a project keeps are generic to any project created from the template; the script removes `create-live.yml`, which exercises the template's own create gesture, and leaves the rest alone.
 - If any step fails or the user wants to abort, stop immediately and leave the tree in a state they can inspect — don't push forward through errors.

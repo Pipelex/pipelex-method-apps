@@ -2,7 +2,7 @@
 
 A Next.js 16 app that runs MTHDS methods through the [Pipelex](https://pipelex.com) API with [`@pipelex/sdk`](https://www.npmjs.com/package/@pipelex/sdk), rendering each method's input form and result view from its own contract.
 
-This repo is a **template**. It ships the run chrome and the codegen kit and no method at all: a project created from it gets its methods from `make add-method`, and its identity from the `/bootstrap` skill. Keep the template small, generic and high-quality, and when adding anything ask whether every project created from it should inherit it. A worked demonstration of a method belongs in the gallery this template was extracted from, `pipelex-starter-js`, never here; [`docs/chrome-lineage.md`](docs/chrome-lineage.md) records that extraction. The bootstrap rewrites this file by exact match, so three things stay as they are: the description line under the H1 is byte-identical to `CLAUDE_DESCRIPTION` in `.claude/skills/bootstrap/scripts/bootstrap.mjs`, this paragraph opens with the sentence the script looks for and ends at the first blank line, and the template's name appears only in the H1; `bootstrap.test.mjs` checks all three.
+This repo is a **template**. It ships the run chrome and the codegen kit and no method at all: `make create` turns a copy of it into the app for one method — scaffolding the method and naming the project after it — and a project adds more methods with `make add-method`. Keep the template small, generic and high-quality, and when adding anything ask whether every project created from it should inherit it. A worked demonstration of a method belongs in the gallery this template was extracted from, `pipelex-starter-js`, never here; [`docs/chrome-lineage.md`](docs/chrome-lineage.md) records that extraction. The bootstrap rewrites this file by exact match, so three things stay as they are: the description line under the H1 is byte-identical to `CLAUDE_DESCRIPTION` in `.claude/skills/bootstrap/scripts/bootstrap.mjs`, this paragraph opens with the sentence the script looks for and ends at the first blank line, and the template's name appears only in the H1; `bootstrap.test.mjs` checks all three.
 
 ## Tech Stack
 
@@ -34,8 +34,10 @@ scripts/                      # native-Node TypeScript (node --experimental-stri
     verify.mts                # runVerify — the keyed semantic gate
     shared.mts                # paths, tree walk, sha256, MethodSource, readManifest, sources.json
     api.mts                   # assertSelectorSupport + explainSelectorFailure — the network half
-    add-method.mts            # runAddMethod — the scaffold, over generate.mts's two halves
+    add-method.mts            # planAddMethod + writeAddMethod — the scaffold, over generate.mts's two halves
     *.test.mts                # vitest over the lib (vitest's glob matches .mts)
+    scaffold-tree.test.mts    # the scaffold's proof: a slice per source kind, compiled and checked in a copy
+    fixtures/                 # recorded API responses, and the bundle the scaffold tests copy in
 src/
   site.ts                     # SITE — the app's title and description, as string literals
   methods.ts                  # METHODS — the registry, with the two add-method anchors
@@ -78,7 +80,8 @@ e2e/
 For a method named `<name>` (kebab-case; `<Pascal>` and `<camel>` are the same name in those cases), `make add-method` writes:
 
 ```
-methods/<name>/method.json                 # the selector: method_ref or method_id
+methods/<name>/                            # the bundle's .mthds files, copied in (or already there) —
+  method.json                              #   or, for a method that lives elsewhere, the selector
 src/generated/<name>/                      # COMMITTED and GENERATED — never hand-edit (see "Generated types")
   types.ts                                 # zod schemas + z.infer types, stamped
   binder.ts                                # parseXxx / serializeXxx over those schemas, stamped
@@ -92,7 +95,7 @@ src/components/<Pascal>Form.tsx            # client component — the compositio
 src/methods.ts                             # + one import and one METHODS entry, at the anchors
 ```
 
-A method authored in this repo is a directory of `.mthds` files instead of a `method.json`; `npm run codegen` projects either kind, and the rest of its slice is written by hand today (see "Adding a method" below).
+The slice is the same for every source kind; only `methods/<name>/` and the way the action names its method differ (see "Adding a method" below).
 
 ### What lives where
 
@@ -116,7 +119,7 @@ A method authored in this repo is a directory of `.mthds` files instead of a `me
 | `npm run codegen:check` / `make codegen-check`   | No — pure hashing, fully offline               | Every `make check`, so every `make all`        |
 | `npm run codegen:verify` / `make codegen-verify` | Yes                                            | Before a release, or after touching `methods/` |
 
-**Two source kinds.** A method directory says where its method lives, and there are two answers: `.mthds` files (the bundle is here) or a `method.json` manifest carrying exactly one selector — `method_ref` (a published package address) or `method_id` (a method in the key's org catalog). Never both in one directory; that is refused. `discoverMethods` returns a `MethodSource` discriminated on `kind`, with `name` and `sourceHashes` common, so every kind-blind gate reads those two: `sources.json` hashes the manifest the way it hashes a bundle, orphan detection is the same for both, and `npm run codegen` regenerates both kinds in one pass. Two consequences to hold on to: **a `method_id` slice regenerates only with a key of the same organization**; and a selector is resolved server-side, so the three keyed scripts ask `GET /v1/version` once and refuse when `extensions` lacks the kind, naming the base URL rather than surfacing a bare `403`. [`docs/add-method.md`](docs/add-method.md) is the reference for the scaffold that writes a manifest and the app files around it.
+**Two source kinds.** A method directory says where its method lives, and there are two answers: `.mthds` files (the bundle is here) or a `method.json` manifest carrying exactly one selector — `method_ref` (a published package address) or `method_id` (a method in the key's org catalog). Never both in one directory; that is refused. `discoverMethods` returns a `MethodSource` discriminated on `kind`, with `name` and `sourceHashes` common, so every kind-blind gate reads those two: `sources.json` hashes the manifest the way it hashes a bundle, orphan detection is the same for both, and `npm run codegen` regenerates both kinds in one pass. Two consequences to hold on to: **a `method_id` slice regenerates only with a key of the same organization**; and a selector is resolved server-side, so the three keyed scripts ask `GET /v1/version` once and refuse when `extensions` lacks the kind, naming the base URL rather than surfacing a bare `403`. [`docs/add-method.md`](docs/add-method.md) is the reference for the scaffold that writes either kind and the app files around it.
 
 **An app with no method is current.** With no `methods/` directory, or one holding no method, and no tree under `src/generated/`, `codegen:check` reports that there is nothing to check and exits `0`, which is what keeps `make all` green on the template as shipped. A tree left behind after its method was removed is still an orphan, and still fails.
 
@@ -196,7 +199,7 @@ export async function pollTextStatsRun(runId: string): Promise<PollOutcome<TextS
 }
 ```
 
-A method with a bundle in this repo passes `mthds_contents: await loadMethodBundles("<name>")` instead of a selector; `loadMethodBundles` (`src/lib/loadBundle.ts`) reads every `.mthds` file under `methods/<name>/`, in path order.
+A method whose bundle is in this repo declares `const METHOD_DIR = "<name>";` in place of the manifest import and passes `mthds_contents: await loadMethodBundles(METHOD_DIR)` in place of the selector; `loadMethodBundles` (`src/lib/loadBundle.ts`) reads every `.mthds` file under `methods/<name>/`, in path order. With a file input, `buildOptions` reads the bundle once and hands the same strings to `prepareInputs` (`files: bundles.map((content) => ({ content }))`) and to the run.
 
 The shared helpers in `src/lib/` own the SDK call + `classifyPipelineError` (server-side, where the SDK error classes still `instanceof`-match): `executeBlockingRun` wraps `client.execute` and **adapts its response onto `RunResults`** (`{ pipeline_run_id, main_stuff }`, reading the SDK-resolved `.main_stuff`) so one narrower serves both modes; `startDurableRun` wraps `client.start`; `pollDurableRun` does one `getRunStatus` (+ `getRunResult` on a terminal status) tick.
 
@@ -239,16 +242,24 @@ Text inputs are plain strings. File inputs (PDFs, images) take one extra step, a
 
 ## Adding a method
 
-**A method that lives elsewhere** — on the platform (a `mt_…` catalog id) or in a published package (a `github.com/owner/repo[/pkg][@tag]` address) — is added with `make add-method METHOD=<selector>`. It writes the manifest, the generated tree, the adapter, the action trio, an action test, the form and the registry entry, refusing rather than overwriting anything that already exists. [`docs/add-method.md`](docs/add-method.md) is the reference, including how to remove a method again.
+**Every method is added with `make add-method METHOD=<method>`**, whatever form it takes:
 
-**A method authored in this repo** is not yet one of the scaffold's forms, so its slice follows the same shape by hand:
+- **a bundle** — a `.mthds` file or a directory of them, copied into `methods/<name>/`; a path already inside `methods/<name>/` is scaffolded in place, all of that directory's files. Author or edit one with `/mthds-build` and `/mthds-edit` first;
+- **a catalog id** (`mt_…`) or **a published address** (`github.com/owner/repo[/pkg][@tag]`), named by a `methods/<name>/method.json` the gesture writes.
 
-1. Create `methods/<name>/` with its `.mthds` files (use `/mthds-build`).
-2. Run `npm run codegen`. It writes `src/generated/<name>/` — the zod schemas, the binders, the IO contracts, the lock, and the sources sidecar. Commit that tree alongside the bundle.
-3. Add the adapter in `src/types/<camel>Pipeline.ts`: re-export the generated type, and write `parseXxx(results)` as the generated binder applied to `wireOutput(results)` inside a `try/catch` that rethrows `describeSchemaFailure(err, "<Name>")` as a `BadPipelineOutputError`. A plural output is `z.array(<Code>Schema).parse(wireListOutput(results))` instead, typed `<Code>[]`. Write no shape by hand.
-4. Add the action **trio** in `src/actions/run<Pascal>Pipeline.ts`, shaped like the scaffolded one above, with `mthds_contents: await loadMethodBundles("<name>")` in `buildOptions` in place of the selector.
-5. Add the form in `src/components/<Pascal>Form.tsx`: module-level `CONTRACT`, `DESCRIPTOR = requireInputForm(INPUT_FORM, "<domain>", "<pipe_code>")` and `RESULT_FIELD = requireResultField(OUTPUT_FORM, CONTRACT, "<domain>", "<pipe_code>")`; `useRunInputs(CONTRACT, DESCRIPTOR)` for the inputs, `useState<ExecutionMode>(DEFAULT_EXECUTION_MODE)` and `useRun({ mode, blocking, start, poll })` for the run. Render `<RunInputsForm fields values onValuesChange disabled>`, `<ModeToggle>` (disabled while running), a submit button gated on `ready`, then `<RunStatus>` while running, `<ErrorDisplay>` on error, and `<RunResult field={RESULT_FIELD} value={state.output} name="<name_in_snake_case>">` on done — all keyed off `state.phase`. Submit with `run(toData())`. **Write neither the form fields nor the result view**; the contract declares both. The form `make add-method` writes is the reference for this file.
-6. Register it in `src/methods.ts`: one import above `// add-method:imports` and one `{ id, label, Component }` entry above `// add-method:tabs`.
+It writes the generated tree, the adapter, the action trio, an action test, the form and the registry entry, refusing rather than overwriting anything that already exists, and takes back everything it wrote if the write fails part-way. [`docs/add-method.md`](docs/add-method.md) is the reference, including how to remove a method again. **Do not write a slice by hand**: if the scaffold cannot express what a method needs, the fix belongs in `scripts/lib/add-method.mts` and its tests, so every later slice gets it too.
+
+After the slice exists, the files under `src/types/`, `src/actions/` and `src/components/` are yours to edit, and `npm run codegen` is the only refresh: it rewrites the generated tree and never touches them.
+
+<!-- template-only:begin -->
+
+## Creating an app from the template (`make create`)
+
+**`make create METHOD=<method>` is the template's one-shot gesture**, and the bootstrap removes it from every project it creates. It runs `add-method`'s read-only half (one fetch), derives the package name, title and description from the method (`NAME=`, `TITLE=`, `DESCRIPTION=` override; `METHOD_NAME=` names the method's directory), checks those values with the bootstrap's `--dry-run`, then scaffolds the method, runs the bootstrap with `--clean`, writes `.env.local` from the shell with exactly one base-URL line, re-syncs `package-lock.json`, runs `make all`, and removes the bootstrap skill once it is green. It asks nothing: a value it cannot derive is a refusal naming the flag. [`docs/create.md`](docs/create.md) is the reference, and [`docs/ci.md`](docs/ci.md) describes `create-live.yml`, the workflow that runs it for real on dispatch.
+
+The template-only files are `scripts/create.mts`, `scripts/lib/create.mts` and its test, `docs/create.md`, `.github/workflows/create-live.yml`, and the `release` skill; the bootstrap's `REMOVALS` lists them, and its `package.json` transform drops the `create` script. **A passage of a file a project keeps that only makes sense in the template sits between two marker lines** — the words `template-only` followed by `:begin`, then by `:end`, in whatever comment the file uses — in the Makefile, this file, `AGENTS.md` and `docs/ci.md`, and the bootstrap removes it with its markers. Keep each marker on a line of its own, never inside a table, and never spell a marker out anywhere else in those files: the bootstrap matches the words on any line. A test in `bootstrap.test.mjs` fails when a file a project keeps names the create gesture outside such a passage.
+
+<!-- template-only:end -->
 
 ## Component Conventions
 
@@ -280,6 +291,7 @@ Enforced via Husky + lint-staged on commit.
 - **Location**: co-located `.test.ts` / `.test.tsx` next to the source file
 - **Queries**: prefer accessible queries (`getByRole`, `getByLabelText`) over `getByTestId`
 - **The template ships no method, so the shared code is tested against fixtures.** `src/test/fixtures/contracts/` holds recorded codegen output; a test that needs a real contract imports one from there, never from `src/generated/`, which is empty until a method is added.
+- **The scaffold is proven by building with it.** `scripts/lib/scaffold-tree.test.mts` copies the tree to a temporary directory, scaffolds one slice per source kind from the complete API responses recorded in `scripts/lib/fixtures/recorded/`, and runs `tsc`, ESLint, the offline codegen check and the emitted action tests over the copy. A change to what `add-method` emits, or to the shared code an emitted file imports, is verified there; [`docs/ci.md`](docs/ci.md) says how the recordings are refreshed.
 - **Mocking the SDK**: mock `@/lib/pipelexClient` with `vi.mock`, returning the methods the code under test calls — `{ execute, start, getRunStatus, getRunResult }` (each a `vi.fn()`). Do **not** mock the `@pipelex/sdk` package directly — it's harder to wire as a constructor and the indirection adds noise. **Use `mockResolvedValueOnce`/`mockRejectedValueOnce`, not the persistent `mockResolvedValue`/`mockRejectedValue`, on these spies**: a persistent resolved mock followed by a rejected one on the same spy trips vitest's async-result tracking and reports a spurious unhandled rejection.
 - **Mocking the actions (form/hook tests)**: mock `@/actions/run<Name>Pipeline` returning `{ run<Name>Blocking, start<Name>Run, poll<Name>Run }` as `vi.fn()`s. `useRun`'s durable poll loop runs on `setTimeout`/`setInterval`, so durable form/hook tests use `vi.useFakeTimers()` and drive with `await vi.advanceTimersByTimeAsync(...)` inside `act()`, querying synchronously (`getByRole`/`getByText`) — `findBy`/`waitFor` conflict with fake timers. A test that drives a file encode keeps **real** timers (`FileReader` needs them) and has the durable poll complete on the first tick so `findBy` works.
 
@@ -306,7 +318,7 @@ Enforced via Husky + lint-staged on commit.
 | `make codegen`        | Regenerate `src/generated/` from `methods/` (needs `PIPELEX_API_KEY`; **not** in `make all`)   |
 | `make codegen-check`  | Prove `src/generated/` is current — offline, no key. Part of `make check`                      |
 | `make codegen-verify` | Ask the engine whether the committed crates are still current (needs a key; not in `make all`) |
-| `make add-method`     | Scaffold a method that lives elsewhere into the app — `METHOD=<mt_… \| address>` (needs a key) |
+| `make add-method`     | Scaffold a method into the app — `METHOD=<bundle path \| mt_… \| address>` (needs a key)       |
 | `make test`           | Vitest single pass                                                                             |
 | `make agent-test`     | Vitest, silent on success (preferred for AI agents)                                            |
 | `make test-e2e`       | Optional Playwright e2e (live specs cost an LLM call; prompts first, auto-skip without a key)  |
@@ -364,6 +376,7 @@ Other targets that matter:
 
 ## Gotchas
 
+- **A `make` variable counts only when it is given on the command line, and not blank.** The Makefile's `given` helper reads a variable's origin before its value, so a `NAME` or `LABEL` the shell exports is not taken as a request, and `NAME=` clears a value rather than passing an empty one; `opt`, `flag` and `require` build on it, `flag` also treating `0` as not given, and `shq` hands the value to the script exactly as typed. A new gesture's variables go through the same helpers — never `$(if $(NAME),--name $(NAME))`, which both inherits the environment and lets the shell reinterpret the value. `scripts/lib/makefile.test.mts` pins the expansions with `make -n`.
 - **The two `add-method:` anchor comments in `src/methods.ts` are a contract — never move, reword or delete the marker tokens.** `make add-method` inserts one import line above `// add-method:imports` and one `METHODS` entry above `// add-method:tabs`, and refuses when it cannot find either. The match is on the token alone, so the prose after a marker can be reworded freely; the tokens themselves cannot move. A test in `scripts/lib/add-method.test.mts` reads the real file, so an edit that loses one fails the suite rather than the next scaffold run. The same is why each entry carries its `Component` and `<MethodPage>` maps over them: a hand-written panel per form would make a scaffolded method a second insertion point.
 - **The dev server runs on port 4300, and it must not go back to 4100.** The number is declared once, as `APP_PORT` in the `Makefile`, which exports it; `package.json`'s `dev`/`start` scripts and `playwright.config.ts` each read it and each default to 4300 on their own, so `npm run dev` outside make still works. Override it per invocation — `make run APP_PORT=4301` — which is what lets a second checkout run beside one that already holds the port. The variable is deliberately not the ambient `PORT`: hosting platforms, other dev servers and shell profiles export that one, and inheriting it would move this server without saying so. 4100 is avoided because the Pipelex server's local stack publishes its build-chatbot sandbox on `127.0.0.1:4100`. The collision is silent rather than loud: Docker holds IPv4 loopback, so `next dev` still binds 4100 on IPv6 and prints `Ready`, while Playwright's health check resolves to IPv4, reaches the container's 404 forever, and fails with `Timed out waiting 120000ms from config.webServer`. When e2e times out with the app apparently up, run `lsof -nP -iTCP:4300 -sTCP:LISTEN` before believing anything else.
 - **`make run`, `make start` and `make test-e2e` refuse a port held by another checkout, and that guard is worth keeping.** Several checkouts of the same app all want 4300, so the holder is routinely another checkout — which answers on `http://localhost:4300` and looks entirely right in a browser. The `port-check` target reads the holder's own working directory (`lsof -a -p <pid> -d cwd`) and compares it against `$(CURDIR)`, so the refusal names the directory actually serving the port instead of printing Node's bare `EADDRINUSE`. The e2e targets pass `ALLOW_OWN=1`, which accepts a server started from **this** directory (Playwright's `reuseExistingServer` is meant to reuse it) and still refuses a foreign one.

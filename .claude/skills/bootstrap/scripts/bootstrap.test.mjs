@@ -27,10 +27,15 @@ import {
   RESET_VERSION,
   TARGETS,
   TEMPLATE_NAME,
+  TEMPLATE_ONLY_BEGIN,
+  TEMPLATE_ONLY_END,
   TEMPLATE_TITLE,
   TEMPLATE_URL,
   resolveLicense,
+  stripTemplateOnly,
+  stripTemplateParagraph,
   titleFromName,
+  transformPackageJson,
   transformSite,
 } from "./bootstrap.mjs";
 
@@ -77,6 +82,37 @@ function makeEmptyRoot() {
 
 function read(root, rel) {
   return fs.readFileSync(path.join(root, rel), "utf8");
+}
+
+/** How the script names a removal: a directory with its trailing slash, a file without. */
+function shownRemoval(rel) {
+  return fs.statSync(path.join(REPO_ROOT, rel)).isDirectory() ? `${rel}/` : rel;
+}
+
+/** Everything a project keeps that could name the create gesture, as repo-relative paths. */
+function keptTextFiles() {
+  const skipped = new Set(["node_modules", ".next", ".git", "wip", "test-results"]);
+  // Rendered or reset whole by the bootstrap, trimmed structurally (package.json),
+  // or removed by the gesture itself once it has run (the bootstrap skill).
+  const rewritten = new Set(["README.md", "CHANGELOG.md", "package.json", "package-lock.json"]);
+  const found = [];
+  const visit = (rel) => {
+    for (const entry of fs.readdirSync(path.join(REPO_ROOT, rel), { withFileTypes: true })) {
+      const child = rel === "" ? entry.name : `${rel}/${entry.name}`;
+      if (skipped.has(child) || child === ".claude/skills/bootstrap") continue;
+      if (REMOVALS.some((removed) => child === removed || child.startsWith(`${removed}/`)))
+        continue;
+      if (entry.isDirectory()) visit(child);
+      else if (
+        entry.isFile() &&
+        !rewritten.has(child) &&
+        /\.(md|mts|ts|tsx|mjs|js|json|yml|css)$|^Makefile$/.test(entry.name)
+      )
+        found.push(child);
+    }
+  };
+  visit("");
+  return found;
 }
 
 /**
@@ -156,11 +192,39 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () =
     expect(read(root, "LICENSE")).toContain(`Copyright (c) ${year} Acme Corp`);
     expect(read(root, "CHANGELOG.md")).toMatch(/## \[v0\.1\.0\] - \d{4}-\d{2}-\d{2}/);
 
-    // The template's own release skill does not travel into a project.
+    // What only the template needs does not travel into a project: its release
+    // skill, and the create gesture with everything that describes it.
     for (const rel of REMOVALS) {
-      expect(res.stdout).toContain(`removed ${rel}/`);
+      expect(res.stdout).toContain(`removed ${shownRemoval(rel)}`);
       expect(fs.existsSync(path.join(root, rel))).toBe(false);
     }
+    expect(pkg.scripts.create).toBeUndefined();
+    expect(pkg.scripts["add-method"]).toBeDefined();
+    for (const rel of ["Makefile", "CLAUDE.md", "AGENTS.md", "docs/ci.md"]) {
+      const text = read(root, rel);
+      expect(text).not.toContain(TEMPLATE_ONLY_BEGIN);
+      expect(text).not.toContain(TEMPLATE_ONLY_END);
+      expect(text).not.toMatch(/make create|npm run create|create-live/);
+    }
+    expect(read(root, "Makefile")).not.toMatch(/^create:/m);
+    expect(read(root, "Makefile")).toMatch(/^add-method:/m);
+    // A doubled blank line is what a careless removal leaves in the one file
+    // Prettier does not format.
+    expect(read(root, "Makefile")).not.toMatch(/\n\n\n/);
+  });
+
+  it("names the create gesture only in what a project does not keep", () => {
+    // Every other mention would describe, in a project, a gesture that is gone.
+    const leaks = keptTextFiles().filter((rel) => {
+      const text = read(REPO_ROOT, rel);
+      let kept = text.includes(TEMPLATE_ONLY_BEGIN) ? stripTemplateOnly(text, rel) : text;
+      // The charter paragraph goes too: `make create` always passes --clean.
+      if (rel === "CLAUDE.md") kept = stripTemplateParagraph(kept);
+      return /make create|npm run create|create-live|scripts\/create\.mts|lib\/create\.mts/.test(
+        kept,
+      );
+    });
+    expect(leaks).toEqual([]);
   });
 
   it("names the template in CLAUDE.md's heading and nowhere else", () => {
@@ -220,7 +284,7 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () =
       expect(read(root, rel)).toBe(before.get(rel));
     }
     for (const rel of REMOVALS) {
-      expect(res.stdout).toContain(`remove  ${rel}/`);
+      expect(res.stdout).toContain(`remove  ${shownRemoval(rel)}`);
       expect(fs.existsSync(path.join(root, rel))).toBe(true);
     }
   });
@@ -321,6 +385,45 @@ describe("bootstrap.mjs helpers", () => {
       kind: "other",
       npmField: "Apache-2.0",
     });
+  });
+
+  it("strips each template-only passage with its markers, collapsing the blank it leaves", () => {
+    const text = [
+      "keep one",
+      "",
+      "# template-only:begin",
+      "create:",
+      "\tnpm run create",
+      "# template-only:end",
+      "",
+      "keep two",
+      "<!-- template-only:begin -->",
+      "gone",
+      "<!-- template-only:end -->",
+      "keep three",
+      "",
+    ].join("\n");
+    expect(stripTemplateOnly(text, "x")).toBe("keep one\n\nkeep two\nkeep three\n");
+  });
+
+  it("leaves a file whose passage is never closed exactly as it was", () => {
+    const text = "a\n# template-only:begin\nb\n";
+    expect(stripTemplateOnly(text, "x")).toBe(text);
+  });
+
+  it("drops the create script from package.json and keeps every other", () => {
+    const pkg = JSON.parse(
+      transformPackageJson(
+        JSON.stringify({
+          name: TEMPLATE_NAME,
+          description: "d",
+          scripts: { dev: "next dev", create: "node scripts/create.mts", "add-method": "x" },
+        }),
+        { name: "app", title: "App" },
+        { description: "App.", lic: resolveLicense("mit", null, 2026) },
+      ),
+    );
+    expect(pkg.scripts).toEqual({ dev: "next dev", "add-method": "x" });
   });
 
   it("rewrites only the SITE object, leaving the doc comment that names its keys", () => {
