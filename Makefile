@@ -70,9 +70,10 @@ typecheck: ## Run TypeScript type checking (app + e2e specs + scripts)
 	npm run typecheck:scripts
 
 # Regenerates src/generated/<method>/ from methods/<method>/. Needs PIPELEX_API_KEY
-# and nothing else: POST /v1/codegen is served on the default hosted URL.
+# and a base URL that serves /v1/validate's form views — for now
+# PIPELEX_BASE_URL=https://api-dev.pipelex.com (see docs/add-method.md).
 # Deliberately OUT of `make all`, for the same reason test-e2e is: key + network.
-codegen: ## Regenerate the typed artifacts in src/generated/ from methods/ (needs PIPELEX_API_KEY)
+codegen: ## Regenerate the typed artifacts in src/generated/ from methods/ (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
 	npm run codegen
 
 # The CI half of the trust chain: pure hashing, no key, no network. Proves each
@@ -83,16 +84,18 @@ codegen-check: ## Verify src/generated/ is current, offline (no API key needed)
 
 # The semantic gate the offline check deliberately cannot be: re-resolves each
 # method live and compares crate fingerprints. Keyed and online, so it stays out
-# of `make all` — run it before a release, or after touching methods/.
-codegen-verify: ## Ask the engine whether the committed crates are still current (needs PIPELEX_API_KEY)
+# of `make all` — run it before a release, or after touching methods/. Wants the
+# same base URL as `codegen`.
+codegen-verify: ## Ask the engine whether the committed crates are still current (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
 	npm run codegen:verify
 
 # Scaffolds a method that lives on the platform (a catalog id) or in a published
 # package (an address) into the app: the manifest, the generated tree, the action
 # trio, the narrower, the form and a registry entry. One-shot — it never
 # overwrites, and `npm run codegen` is the refresh. Keyed and online, so it stays
-# out of `make all`.
-add-method: ## Scaffold a method into the app from METHOD=<mt_… | github.com/owner/repo[/pkg][@tag]> (needs PIPELEX_API_KEY)
+# out of `make all`. Wants the same base URL as `codegen`, which is also the one
+# that resolves a package address.
+add-method: ## Scaffold a method into the app from METHOD=<mt_… | github.com/owner/repo[/pkg][@tag]> (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
 	@if [ -z "$(METHOD)" ]; then \
 		echo "usage: make add-method METHOD=<mt_… | github.com/owner/repo[/pkg][@tag]> [PIPE=<pipe_code>] [NAME=<dir-name>] [LABEL=<label>] [DRY_RUN=1]"; \
 		exit 2; \

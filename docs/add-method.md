@@ -63,7 +63,7 @@ src/methods.ts                          # one import line, one registry entry
 
 It sits under `methods/` rather than beside the generated tree, and that placement is why the codegen scripts treat it like a bundle. `methods/` stays the source of truth and `src/generated/` stays purely derived, so every rule the [trust chain](codegen.md#the-trust-chain) rests on holds by construction: `sources.json` hashes the manifest the way it hashes a bundle, orphan detection still reads "a generated tree with no `methods/<name>/`", and `npm run codegen` regenerates selector-sourced trees beside file-sourced ones. A method directory holds either `.mthds` files or a `method.json`, never both — the two would disagree about where the tree came from, and the check refuses that naming both.
 
-**To move to another version of a published method, edit the tag and run `npm run codegen`.** That is the whole upgrade: the manifest's hash changes, `make check` fails with the usual "run `npm run codegen`" remedy until you do, and the regenerated diff shows what the new tag changed. See [Two source kinds](codegen.md#two-source-kinds) for the mechanics.
+**To move to another version of a published method, edit the tag and run `npm run codegen`.** That is the whole upgrade: the manifest's hash changes, `make check` fails with the usual "run `npm run codegen`" remedy until you do, and the regenerated diff shows what the new tag changed. The run follows without an edit, because the scaffolded action does not carry a copy of the selector: it imports the manifest (`import MANIFEST from "@methods/<name>/method.json"`, the `@methods/*` alias being declared in `tsconfig.json` and `vitest.config.mts`) and sends `MANIFEST.method_ref` or `MANIFEST.method_id`. Switching a manifest from one selector kind to the other is the one edit that also needs the action changed, and `tsc` says so. See [Two source kinds](codegen.md#two-source-kinds) for the mechanics.
 
 ## One-shot, on purpose
 
@@ -77,7 +77,7 @@ Two escapes if you actually want a second slice of the same method: `--name` sca
 
 Everything comes from one kebab-case slug.
 
-- **The slug** is `--name` when given; otherwise the catalog method's `name` for an id (a person chose it) and the address's last path segment for a ref — the package, falling back to the repository for an address naming no package. It is kebab-cased (`text_stats` → `text-stats`, `CV screening` → `cv-screening`) and validated: a name that cannot be a directory, a registry id and the stem of four source files is a refusal here, not a broken import later.
+- **The slug** is `--name` when given; otherwise the catalog method's `name` for an id (a person chose it) and the address's last path segment for a ref — the package, falling back to the repository for an address naming no package. It is kebab-cased (`text_stats` → `text-stats`, `CV screening` → `cv-screening`) and validated: a name that cannot be a directory, a registry id and the stem of four source files is a refusal here, not a broken import later. It must start with a letter, because it also becomes TypeScript identifiers — `3D model` is refused and needs `--name`.
 - **`TextStats`** (Pascal) names the component, the three actions and the output type; **`textStats`** (camel) names the adapter module; **`Text stats`** (humanized) is the fallback label.
 - **The registry id** is the slug.
 

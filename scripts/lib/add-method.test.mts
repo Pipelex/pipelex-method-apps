@@ -128,6 +128,7 @@ describe("the name derivations", () => {
     ["Test-1", "test-1"],
     ["pipelex_mcp_e2e_fixture", "pipelex-mcp-e2e-fixture"],
     ["  Create   moodboard  ", "create-moodboard"],
+    ["Model 3D", "model-3d"],
   ])("kebab-cases %s", (input, expected) => {
     expect(kebabCase(input)).toBe(expected);
   });
@@ -136,6 +137,7 @@ describe("the name derivations", () => {
     ["", "empty"],
     ["---", "punctuation only"],
     ["🙂", "no ASCII at all"],
+    ["3D model", "a leading digit, which no TypeScript identifier may have"],
   ])("refuses %s (%s), pointing at --name", (input) => {
     expect(() => kebabCase(input)).toThrow(/--name/);
   });
@@ -400,6 +402,23 @@ describe("parseArgs", () => {
 
 // ── The registry ────────────────────────────────────────────────────────────
 
+/**
+ * `src/methods.ts` as the template ships it: the real file, with every method a
+ * project has since registered taken back out. These tests run in projects
+ * created from the template too, so they must not depend on which methods that
+ * project has added — only on the anchors, which are read from the real file.
+ */
+function emptiedRegistry(source: string): string {
+  const lines = source
+    .split("\n")
+    .filter((line) => !/^import\s.*\sfrom\s+"@\/components\//.test(line));
+  const arrayAt = lines.findIndex((line) => line.startsWith("export const METHODS"));
+  // Everything between the opening bracket and the anchor's comment block is a
+  // registration, however it was formatted; the block starts at its first comment.
+  const commentAt = lines.findIndex((line, at) => at > arrayAt && line.trim().startsWith("//"));
+  return [...lines.slice(0, arrayAt + 1), ...lines.slice(commentAt)].join("\n");
+}
+
 describe("registerMethod", () => {
   const ENTRY = { id: "demo", label: "Demo", componentName: "DemoForm" };
 
@@ -443,10 +462,10 @@ describe("registerMethod", () => {
     expect(() => registerMethod(source, { ...ENTRY, id: "other" })).toThrow(/--name/);
   });
 
-  it("keeps the real registry valid after the entry lands", async () => {
+  it("lands the first entry inside the empty array, above the anchor comment", async () => {
     // The empty array the template ships is where the first entry goes: the
     // entry must land inside it, above the anchor comment, and nowhere else.
-    const updated = registerMethod(await realRegistry(), ENTRY);
+    const updated = registerMethod(emptiedRegistry(await realRegistry()), ENTRY);
     const body = updated.slice(updated.indexOf("export const METHODS"));
     expect(body).toMatch(
       /= \[\n\s+\{ id: "demo", label: "Demo", Component: DemoForm \},\n\s+\/\/ add-method:tabs/,
@@ -511,7 +530,11 @@ describe("renderAdapter", () => {
 describe("renderAction", () => {
   it("sends the selector in place of an inline bundle, with the bare pipe code", () => {
     const source = renderAction(TEXT_STATS_PLAN);
-    expect(source).toContain(`const METHOD_REF = "${TEXT_STATS_REF}";`);
+    // The selector is read from the manifest, never copied into the action, so
+    // an upgrade — edit the manifest, regenerate — moves the run with the tree.
+    expect(source).toContain('import MANIFEST from "@methods/text-stats/method.json";');
+    expect(source).toContain("const METHOD_REF = MANIFEST.method_ref;");
+    expect(source).not.toContain(TEXT_STATS_REF);
     expect(source).toContain('const PIPE_CODE = "analyze_text";');
     expect(source).toContain('requireContract(PIPE_IO_CONTRACTS, "text_stats", PIPE_CODE)');
     expect(source).toContain("method_ref: METHOD_REF,");
@@ -539,6 +562,7 @@ describe("renderAction", () => {
     // prepareInputs keys on the QUALIFIED ref — a bare pipe code is refused.
     expect(source).toContain('const PIPE_REF = "documents.extract_text_pages";');
     expect(source).toContain("pipe_ref: PIPE_REF,");
+    expect(source).toContain("const METHOD_ID = MANIFEST.method_id;");
     expect(source).toContain("method_id: METHOD_ID,");
     // The file gate runs over the GATED inputs, never beside the gate — so
     // inside `gateInputs` the shape gate comes first and short-circuits.
@@ -567,12 +591,15 @@ describe("renderActionTest", () => {
     expect(source).toContain("refuses an empty submission before calling the SDK (blocking)");
     expect(source).toContain("expect(execute).not.toHaveBeenCalled();");
     expect(source).not.toContain("execute.mockResolvedValue");
+    // Nothing here reads the selector, and an unused import would fail tsc.
+    expect(source).not.toContain("MANIFEST");
   });
 
   it("pins the wiring instead when the pipe gates on nothing", () => {
     const source = renderActionTest({ ...TEXT_STATS_PLAN, gating: false });
     expect(source).toContain("expect(execute).toHaveBeenCalledWith({");
-    expect(source).toContain(`method_ref: "${TEXT_STATS_REF}",`);
+    expect(source).toContain('import MANIFEST from "@methods/text-stats/method.json";');
+    expect(source).toContain("method_ref: MANIFEST.method_ref,");
     expect(source).toContain('pipe_code: "analyze_text",');
   });
 });
@@ -632,11 +659,12 @@ describe("runAddMethod", () => {
       await mkdir(path.join(dir, relative), { recursive: true });
     }
     // The real registry, copied rather than fabricated, so the anchors under
-    // test stay exactly the ones on disk. The template ships it empty, which is
-    // the state this gesture is designed to run against.
+    // test stay exactly the ones on disk — emptied of whatever this checkout
+    // has registered, so a project that already scaffolded `text-stats` does
+    // not see these runs refused as duplicates.
     await writeFile(
       path.join(dir, "src", "methods.ts"),
-      await readFile(path.join(REPO_ROOT, "src", "methods.ts"), "utf-8"),
+      emptiedRegistry(await readFile(path.join(REPO_ROOT, "src", "methods.ts"), "utf-8")),
       "utf-8",
     );
     return dir;
@@ -772,7 +800,12 @@ describe("runAddMethod", () => {
       path.join(root, "src/actions/runPipelexMcpE2eFixturePipeline.ts"),
       "utf-8",
     );
-    expect(action).toContain('const METHOD_ID = "mt_ca0aa9d3-61ac-4db1-8b46-fb0cc75787df";');
+    expect(action).toContain("const METHOD_ID = MANIFEST.method_id;");
+    const manifest = await readFile(
+      path.join(root, "methods/pipelex-mcp-e2e-fixture/method.json"),
+      "utf-8",
+    );
+    expect(JSON.parse(manifest)).toEqual({ method_id: "mt_ca0aa9d3-61ac-4db1-8b46-fb0cc75787df" });
   });
 
   it("--dry-run stops at the end of the read-only half, writing nothing", async () => {
@@ -784,6 +817,14 @@ describe("runAddMethod", () => {
     expect(await written()).toEqual(["src/methods.ts"]);
     expect(lines.join("\n")).toContain("text_stats.analyze_text");
     expect(lines.join("\n")).toContain("Nothing was written");
+  });
+
+  it("refuses a --name that cannot become a TypeScript identifier, writing nothing", async () => {
+    const client = fakeClient();
+    expect(await runAddMethod([TEXT_STATS_REF, "--name", "3d-model"], deps(client))).toBe(1);
+
+    expect(client.codegen).not.toHaveBeenCalled();
+    expect(await written()).toEqual(["src/methods.ts"]);
   });
 
   it("refuses a base URL that does not forward the selector, before any fetch", async () => {

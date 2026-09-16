@@ -148,13 +148,16 @@ export function addressSegments(methodRef: string): string[] {
 
 // ── Names ───────────────────────────────────────────────────────────────────
 
-const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+// A letter first: the slug also becomes TypeScript identifiers (`TextStatsForm`,
+// `runTextStatsBlocking`), and an identifier cannot start with a digit.
+const SLUG_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 /**
  * `text_stats` → `text-stats`, `CV screening` → `cv-screening`, `Test-1` →
  * `test-1`. The result is a directory name, a registry id, and the stem of four
- * source files, so it is validated rather than merely produced: a name that
- * cannot be one of those is a refusal here, not a broken import later.
+ * source files and of the identifiers in them, so it is validated rather than
+ * merely produced: a name that cannot be one of those — `3D model`, whose slug
+ * would start with a digit — is a refusal here, not a broken import later.
  */
 export function kebabCase(input: string): string {
   const slug = input
@@ -165,7 +168,7 @@ export function kebabCase(input: string): string {
   if (!SLUG_PATTERN.test(slug)) {
     throw new AddMethodError(
       `"${input}" does not yield a usable directory name (got "${slug}"). ` +
-        "Pass --name with a kebab-case name of your own.",
+        "Pass --name with a kebab-case name of your own that starts with a letter.",
     );
   }
   return slug;
@@ -565,11 +568,21 @@ export function renderManifest(selector: ValidateMethodSelector): string {
   return `${JSON.stringify(selector, null, 2)}\n`;
 }
 
-/** How the selector reads as a TypeScript constant pair: the name and the literal. */
-function selectorConstant(selector: ValidateMethodSelector): { name: string; value: string } {
+/**
+ * How the emitted code names the selector: the constant, and the manifest field
+ * it is read from. The value itself is never copied into a source file — the
+ * action and its test import the manifest — so editing `method.json` and running
+ * `npm run codegen` moves the run and the generated contract together.
+ */
+function selectorConstant(selector: ValidateMethodSelector): { name: string; field: string } {
   return selectorKind(selector) === "method_ref"
-    ? { name: "METHOD_REF", value: JSON.stringify(selector.method_ref) }
-    : { name: "METHOD_ID", value: JSON.stringify(selector.method_id) };
+    ? { name: "METHOD_REF", field: "method_ref" }
+    : { name: "METHOD_ID", field: "method_id" };
+}
+
+/** `import MANIFEST from "@methods/<slug>/method.json";` — the one copy of the selector. */
+function manifestImport(names: ScaffoldNames): string {
+  return `import MANIFEST from "@methods/${names.slug}/method.json";`;
 }
 
 /**
@@ -675,6 +688,7 @@ export function renderAction(plan: ScaffoldPlan): string {
   const hasFiles = files.length > 0;
 
   const imports = [
+    manifestImport(names),
     `import { ${hasFiles ? "INPUT_FORM, " : ""}PIPE_IO_CONTRACTS } from "@/generated/${names.slug}/contracts";`,
     `import { ${parseName}, type ${outputType} } from "@/types/${names.camel}Pipeline";`,
     'import { executeBlockingRun, type BlockingOutcome } from "@/lib/blockingRun";',
@@ -689,7 +703,7 @@ export function renderAction(plan: ScaffoldPlan): string {
   ];
   if (hasFiles) {
     imports.splice(
-      2,
+      3,
       0,
       'import { getPipelexClient } from "@/lib/pipelexClient";',
       'import { MAX_FILE_BYTES, checkFileInputs } from "@/lib/fileEncoding";',
@@ -705,10 +719,11 @@ export function renderAction(plan: ScaffoldPlan): string {
     "// Scaffolded by `make add-method` — yours to edit from here on.",
     "//",
     "// The method is NOT copied into this repo: it lives where",
-    `// \`${scaffoldPaths(names).manifest}\` says, and the run names the same selector the`,
-    "// generated tree was projected from. To move to another version of it, edit that",
-    "// manifest and run `npm run codegen`.",
-    `const ${constant.name} = ${constant.value};`,
+    `// \`${scaffoldPaths(names).manifest}\` says. The selector is read from that manifest`,
+    "// rather than copied here, so the run always names the method the generated tree",
+    "// was projected from: to move to another version, edit the manifest and run",
+    "// `npm run codegen`.",
+    `const ${constant.name} = MANIFEST.${constant.field};`,
     `const PIPE_CODE = ${JSON.stringify(pipe.code)};`,
   ];
   if (hasFiles) {
@@ -779,12 +794,12 @@ export function renderAction(plan: ScaffoldPlan): string {
       "  inputs: Record<string, unknown>,",
       "): Promise<PipelexStartOptions> {",
       "  const prepared = await getPipelexClient().prepareInputs({",
-      `    ${constant.name === "METHOD_REF" ? "method_ref" : "method_id"}: ${constant.name},`,
+      `    ${constant.field}: ${constant.name},`,
       "    pipe_ref: PIPE_REF,",
       "    inputs,",
       "  });",
       "  return {",
-      `    ${constant.name === "METHOD_REF" ? "method_ref" : "method_id"}: ${constant.name},`,
+      `    ${constant.field}: ${constant.name},`,
       "    pipe_code: PIPE_CODE,",
       "    inputs: prepared.inputs,",
       "  };",
@@ -804,7 +819,7 @@ export function renderAction(plan: ScaffoldPlan): string {
       "  inputs: Record<string, unknown>,",
       "): Promise<PipelexStartOptions> {",
       "  return {",
-      `    ${constant.name === "METHOD_REF" ? "method_ref" : "method_id"}: ${constant.name},`,
+      `    ${constant.field}: ${constant.name},`,
       "    pipe_code: PIPE_CODE,",
       "    inputs,",
       "  };",
@@ -860,7 +875,6 @@ export function renderAction(plan: ScaffoldPlan): string {
 export function renderActionTest(plan: ScaffoldPlan): string {
   const { names, selector, pipe, files, gating } = plan;
   const constant = selectorConstant(selector);
-  const selectorField = constant.name === "METHOD_REF" ? "method_ref" : "method_id";
   const hasFiles = files.length > 0;
 
   const clientMethods = ["execute", "start", "getRunStatus", "getRunResult"];
@@ -875,6 +889,8 @@ export function renderActionTest(plan: ScaffoldPlan): string {
     `  getPipelexClient: () => ({ ${clientMethods.join(", ")} }),`,
     "}));",
     "",
+    // Only the non-gating test reads the selector; an unused import fails tsc.
+    ...(gating ? [] : [manifestImport(names)]),
     "import {",
     `  run${names.pascal}Blocking,`,
     `  start${names.pascal}Run,`,
@@ -917,7 +933,7 @@ export function renderActionTest(plan: ScaffoldPlan): string {
         '    execute.mockResolvedValueOnce({ pipeline_run_id: "run-1", main_stuff: {} });',
         `    await run${names.pascal}Blocking({});`,
         "    expect(execute).toHaveBeenCalledWith({",
-        `      ${selectorField}: ${constant.value},`,
+        `      ${constant.field}: MANIFEST.${constant.field},`,
         `      pipe_code: ${JSON.stringify(pipe.code)},`,
         "      inputs: {},",
         "    });",
@@ -1256,7 +1272,9 @@ async function runAddMethodInner(argv: readonly string[], deps?: AddMethodDeps):
 
   const slug = args.name === undefined ? kebabCase(slugSource(selector, catalogName)) : args.name;
   if (!SLUG_PATTERN.test(slug)) {
-    throw new AddMethodError(`--name "${slug}" is not kebab-case (a-z, 0-9 and single dashes).`);
+    throw new AddMethodError(
+      `--name "${slug}" is not kebab-case starting with a letter (a-z first, then a-z, 0-9 and single dashes).`,
+    );
   }
   const names = scaffoldNames(slug, args.label ?? catalogName);
   const paths = scaffoldPaths(names);

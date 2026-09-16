@@ -152,6 +152,7 @@ This is the trio `make add-method` writes for a method with no file input, abrid
 ```ts
 // src/actions/runTextStatsPipeline.ts
 "use server";
+import MANIFEST from "@methods/text-stats/method.json";
 import { PIPE_IO_CONTRACTS } from "@/generated/text-stats/contracts";
 import { parseTextStatsOutput, type TextStatsOutput } from "@/types/textStatsPipeline";
 import { executeBlockingRun, type BlockingOutcome } from "@/lib/blockingRun";
@@ -164,7 +165,9 @@ import {
 import { gateRunInputs, requireContract } from "@/lib/runInputs";
 import type { PipelexStartOptions } from "@pipelex/sdk";
 
-const METHOD_REF = "github.com/Pipelex/methods/text_stats@v0.1.1";
+// The selector is read from the manifest, never copied: editing `method.json` and
+// running `npm run codegen` moves the run together with the generated tree.
+const METHOD_REF = MANIFEST.method_ref;
 const PIPE_CODE = "analyze_text";
 
 // The same generated contract the browser rendered the form from.
@@ -208,6 +211,7 @@ There is no `pipe_output` search arm: the SDK resolving `.main_stuff` on both pa
 
 Conventions:
 
+- **The manifest is the one copy of a selector**: an action imports `methods/<name>/method.json` through the `@methods/*` alias (`tsconfig.json`, `vitest.config.mts`) and never restates the address or id it holds.
 - **Bundle source**: a method authored here ships its `.mthds` files under `methods/<name>/` and they are read at request time with `loadMethodBundles`. Do **not** inline bundle TOML as a string in `.ts` — bundles are first-class.
 - **One client**: instantiate `PipelexApiClient` once via `getPipelexClient()`. Never `new PipelexApiClient()` directly in actions or components.
 - **Narrow at the boundary, but never re-declare the shape**: the SDK returns loosely-typed output, so always pass the whole `RunResults` through a `parseXxx(results)` narrower in `src/types/`. That narrower hands `wireOutput(results)` to the generated binder and translates the thrown `ZodError` into a tagged subclass of `Error` (`BadPipelineOutputError`) via `describeSchemaFailure`. Do not `as` your way through, and do not hand-write the shape it validates — the method already declares it and `npm run codegen` projects it.

@@ -1,7 +1,16 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { MethodPage } from "./MethodPage";
 import type { RegisteredMethod } from "@/methods";
+
+// The app's own registry is replaced by one stand-in, so the default-prop test
+// pins the wiring without depending on which methods this checkout has added
+// (and without importing their forms and Server Actions).
+vi.mock("@/methods", () => ({
+  METHODS: [
+    { id: "registered", label: "Registered", Component: () => <div>REGISTERED PANEL</div> },
+  ],
+}));
 
 // Stand-in method panels — this test covers the page's three shapes only, so a
 // registry of its own is passed rather than the app's.
@@ -56,8 +65,7 @@ describe("MethodPage", () => {
   });
 
   it("renders the app's own registry when given none", () => {
-    // The template ships no method, so a fresh clone shows the empty state.
     render(<MethodPage />);
-    expect(screen.getByRole("heading", { name: "No method yet" })).toBeVisible();
+    expect(screen.getByText("REGISTERED PANEL")).toBeVisible();
   });
 });
