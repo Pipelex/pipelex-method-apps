@@ -18,12 +18,12 @@ This skill releases the template from inside the Pipelex workspace, and the boot
 
 ## What ships
 
-**Nothing is published, and that is the whole answer.** `package.json` declares `"private": true`, so nothing goes to npm. `.github/workflows/` holds `lint-check.yml` and `tests-check.yml`, and both open with `on: pull_request:` — no workflow in this repo fires on a push to `main`, so the merge triggers no build, no publish and no tagger. The repo carries no tags and no GitHub Releases, and none are made by hand. What the merge produces is the template at its new version on `main`, which is this repo's default branch and therefore what GitHub's **Use this template** copies into a new repository.
+**Nothing is published.** That is the whole answer: `package.json` declares `"private": true`, so nothing goes to npm. `.github/workflows/` holds `lint-check.yml` and `tests-check.yml`, and both open with `on: pull_request:` — no workflow in this repo fires on a push to `main`, so the merge triggers no build, no publish and no tagger. The repo carries no tags and no GitHub Releases, and none are made by hand. What the merge produces is the template at its new version on `main`, which is this repo's default branch and therefore what GitHub's **Use this template** copies into a new repository.
 
-The landing has no publish to verify, so it verifies the merge and the version that reached `main`:
+The opening sentence is the declaration `ledger land` reads, spelled exactly so, and the `git show origin/main:package.json` below is where it reads the version from. The landing has no publish to verify, so it verifies the merge commit is on `main` and that `package.json` there spells the version the release branch spells, then closes the release item on those readings. By hand, from anywhere, the same readings are:
 
 ```bash
-gh pr view <number> --json state,mergedAt,mergeCommit            # MERGED, and the merge commit
+cd <main> && gh pr view <number> --json state,mergedAt,mergeCommit   # MERGED, and the merge commit
 git -C <main> fetch --prune origin
 git -C <main> show origin/main:package.json | grep '"version"'   # X.Y.Z
 ```
