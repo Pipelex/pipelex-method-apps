@@ -1,5 +1,30 @@
 # Changelog
 
+## [v0.2.0] - 2026-09-16
+
+### Highlights
+
+**The repository is now a family of templates.** Each template is a directory of its own, `webapp-js/` first, and a project starts as a copy of that directory. **The web app is safer by default**: it listens on loopback, so it no longer serves methods billed to the developer's API key to every network the machine is on, and it runs on a Next.js release clear of two critical remote-code-execution advisories.
+
+### Changed
+
+- **The repository is the `pipelex-method-apps` family of templates (Breaking)**: the GitHub repository is renamed from `pipelex-method-app`, whose URLs redirect, and is no longer marked as a template. The web app template moved into `webapp-js/`, and a project now starts as a copy of that directory rather than from GitHub's **Use this template** button — clone the repository shallowly, copy `webapp-js/` into a new directory, run `git init` there, then `make create`. The family carries one version, in the root `VERSION` file, and one changelog, this one, and the root `make all` runs every template's checks, tests and build.
+- **The web app template's package is `pipelex-method-webapp-js` (Breaking)**: `make create` and the bootstrap run only while `package.json` carries that name, and a created project's first changelog entry links the template's directory.
+- **`make use-local` takes `SIBLINGS_DIR`**: the sibling `pipelex-sdk-js` and `mthds-form` checkouts are built from the directory given, and from the parent directory when none is.
+
+### Fixed
+
+- **`make create` on a busy machine**: the web app template's tests that spawn `make`, or run the bootstrap script, allow a minute each instead of five seconds, so the gesture's closing `make all` no longer fails, and leaves the project half-finished, when the machine is loaded.
+
+### Removed
+
+- **The live `make create` workflow**: no workflow runs the gesture against the API, because none is given an API key. The template's `docs/ci.md` describes the local run that takes its place.
+
+### Security
+
+- **The web app's servers listen on loopback by default (Breaking)**: `make dev`, `make start`, `npm run dev` and `npm run start` bind `127.0.0.1` instead of every network interface, because anyone who could reach the server ran methods billed to the developer's `PIPELEX_API_KEY`. `APP_HOST`, beside `APP_PORT`, widens it — `make dev APP_HOST=0.0.0.0` for a container or another device — and the Makefile warns whenever a server starts beyond loopback.
+- **Next.js 16.3.5**: the web app template requires `next` and `eslint-config-next` at `^16.3.5` and locks 16.3.5, past the two critical remote-code-execution advisories that affect every Next.js 16 release before 16.3.3 (GHSA-p293-qw3h-jr36, GHSA-2xp9-vwfh-vxw4). The lock also takes the patched `vitest`, `sharp`, `browserslist` and `js-yaml`, so `npm audit` reports nothing.
+
 ## [v0.1.0] - 2026-09-16
 
 ### Added

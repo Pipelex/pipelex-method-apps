@@ -39,7 +39,7 @@ Store the result as `TARGET_VERSION` (no `v` prefix, e.g. `0.3.0`). Warn if it's
 
 You need the kernel's `CHANGELOG.md` entries for every version strictly after the current one, up to and including `TARGET_VERSION`. Get it from whichever source is available, in this order:
 
-1. **Local sibling checkout**, if this workspace has one: `../mthds-form/CHANGELOG.md`. Fast, no network, and it's the canonical source when present.
+1. **Local sibling checkout**, if this workspace has one: `../mthds-form/CHANGELOG.md`, or the same file under the directory `make use-local`'s `SIBLINGS_DIR` names when the checkouts are elsewhere. Fast, no network, and it's the canonical source when present.
 2. **GitHub raw**, otherwise: fetch `https://raw.githubusercontent.com/Pipelex/mthds-form/main/CHANGELOG.md` (the repo is `Pipelex/mthds-form`, confirmed via `npm view @pipelex/mthds-form repository.url`). Don't assume the npm tarball ships a `CHANGELOG.md`.
 
 Extract the entries between `## [v{CURRENT}]` (exclusive) and `## [v{TARGET_VERSION}]` (inclusive) and present them to the user, grouped by version, newest first.
@@ -93,7 +93,7 @@ Then, conditionally:
 
 ## Step 7 — Update This Repo's CHANGELOG.md
 
-This repo keeps an `## [Unreleased]` section at the top of `CHANGELOG.md` (see existing entries for the format). Add or extend a `### Changed` bullet under it, e.g.:
+This repo keeps an `## [Unreleased]` section at the top of `CHANGELOG.md` (see existing entries for the format) — or in the changelog that file points to, when it only points elsewhere. Add or extend a `### Changed` bullet under it, e.g.:
 
 ```markdown
 - Bumped `@pipelex/mthds-form` to `{TARGET_VERSION}` (was `{OLD_VERSION}`).
@@ -115,7 +115,7 @@ Ask the user to confirm. On confirmation:
 2. Commit with message: `Bump @pipelex/mthds-form to {TARGET_VERSION}` (add a short body line if Step 4 applied migrations or Step 6 regenerated trees, naming them).
 3. Show the commit result.
 
-Then offer (but do not automatically execute) pushing and opening a PR, same as the `release` skill — target branch `dev` per this repo's `CLAUDE.md`. Wait for explicit approval before either.
+Then offer (but do not automatically execute) pushing and opening a PR — target branch `dev` per this repo's `CLAUDE.md`. Wait for explicit approval before either.
 
 ## Rules
 

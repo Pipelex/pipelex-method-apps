@@ -48,6 +48,11 @@ const IS_TEMPLATE =
 // beside them, or the temp copies would print at Prettier's defaults.
 const SUPPORT_FILES = [".prettierrc", ".prettierignore"];
 
+// A test that runs the real CLI spawns Node, and the rewriting ones run
+// Prettier inside it too, which is slow on a busy machine: vitest's 5-second
+// default would fail the template's `make all` whenever the machine is loaded.
+const SPAWNS = { timeout: 60_000 };
+
 const tempRoots = [];
 afterAll(() => {
   for (const root of tempRoots) fs.rmSync(root, { recursive: true, force: true });
@@ -136,7 +141,7 @@ function baseArgs(root, overrides = {}) {
   return Object.entries(values).flat();
 }
 
-describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () => {
+describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", SPAWNS, () => {
   it("rewrites every target file with zero warnings", () => {
     const root = makeTempRepo();
     const res = runScript([
@@ -177,7 +182,7 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () =
 
     const claude = read(root, "CLAUDE.md");
     expect(claude).not.toContain(TEMPLATE_NAME);
-    expect(claude).not.toContain("This repo is a **template**.");
+    expect(claude).not.toContain("This directory is a **template**.");
     expect(claude).toContain("# invoice-extractor");
     expect(claude).toContain("Extracts invoices.");
 
@@ -192,8 +197,8 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () =
     expect(read(root, "LICENSE")).toContain(`Copyright (c) ${year} Acme Corp`);
     expect(read(root, "CHANGELOG.md")).toMatch(/## \[v0\.1\.0\] - \d{4}-\d{2}-\d{2}/);
 
-    // What only the template needs does not travel into a project: its release
-    // skill, and the create gesture with everything that describes it.
+    // What only the template needs does not travel into a project: the create
+    // gesture, with everything that describes it.
     for (const rel of REMOVALS) {
       expect(res.stdout).toContain(`removed ${shownRemoval(rel)}`);
       expect(fs.existsSync(path.join(root, rel))).toBe(false);
@@ -204,7 +209,7 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () =
       const text = read(root, rel);
       expect(text).not.toContain(TEMPLATE_ONLY_BEGIN);
       expect(text).not.toContain(TEMPLATE_ONLY_END);
-      expect(text).not.toMatch(/make create|npm run create|create-live/);
+      expect(text).not.toMatch(/make create|npm run create/);
     }
     expect(read(root, "Makefile")).not.toMatch(/^create:/m);
     expect(read(root, "Makefile")).toMatch(/^add-method:/m);
@@ -213,14 +218,15 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () =
     expect(read(root, "Makefile")).not.toMatch(/\n\n\n/);
   });
 
-  it("names the create gesture only in what a project does not keep", () => {
-    // Every other mention would describe, in a project, a gesture that is gone.
+  it("names the create gesture and the mono-repo only in what a project does not keep", () => {
+    // Every other mention would describe, in a project, a gesture that is gone,
+    // or a repository the project was never part of.
     const leaks = keptTextFiles().filter((rel) => {
       const text = read(REPO_ROOT, rel);
       let kept = text.includes(TEMPLATE_ONLY_BEGIN) ? stripTemplateOnly(text, rel) : text;
       // The charter paragraph goes too: `make create` always passes --clean.
       if (rel === "CLAUDE.md") kept = stripTemplateParagraph(kept);
-      return /make create|npm run create|create-live|scripts\/create\.mts|lib\/create\.mts/.test(
+      return /make create|npm run create|scripts\/create\.mts|lib\/create\.mts|pipelex-method-apps|mono-repo/.test(
         kept,
       );
     });
@@ -338,7 +344,7 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () =
   });
 });
 
-describe("bootstrap.mjs input guards", () => {
+describe("bootstrap.mjs input guards", SPAWNS, () => {
   it("rejects a flag value that was swallowed by the next flag", () => {
     const res = runScript([
       "--root",

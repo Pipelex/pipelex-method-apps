@@ -5,7 +5,7 @@ A fresh copy of this template is an app with no method, under the template's own
 ```bash
 PIPELEX_API_KEY=… PIPELEX_BASE_URL=https://api-dev.pipelex.com \
   make create METHOD=path/to/my_method.mthds
-make dev   # http://localhost:4300
+make dev   # http://127.0.0.1:4300
 ```
 
 When it finishes, the page is your method's input form and result view, the project is named after the method, `.env.local` points at the API the gesture ran against, and `make all` is green. Nothing is committed: the whole result is a working-tree change for you to review.
@@ -19,7 +19,7 @@ This document is part of the template, not of the projects it creates: the gestu
 | Make       | `make create METHOD=<method> [NAME=…] [TITLE=…] [DESCRIPTION=…] [METHOD_NAME=…] [PIPE=…] [LABEL=…] [AUTHOR_NAME=…] [AUTHOR_EMAIL=…] [REPO_URL=…] [LICENSE=…] [LICENSE_HOLDER=…] [LICENSE_YEAR=…] [DRY_RUN=1]`                        |
 | npm        | `npm run create -- <method> [--name …] [--title …] [--description …] [--method-name …] [--pipe …] [--label …] [--author-name …] [--author-email …] [--repo-url …] [--license …] [--license-holder …] [--license-year …] [--dry-run]` |
 | Needs      | `PIPELEX_API_KEY`, and a base URL that serves the form views (and `method_ref`, for an address) — see [the base URL](#the-key-and-the-base-url)                                                                                      |
-| Runs on    | The un-bootstrapped template only: `package.json` must still be named `pipelex-method-app`, and the bootstrap skill must be present                                                                                                  |
+| Runs on    | The un-bootstrapped template only: `package.json` must still be named `pipelex-method-webapp-js`, and the bootstrap skill must be present                                                                                            |
 | Exit codes | `0` created (or rehearsed), `1` refused or failed — never a thrown stack                                                                                                                                                             |
 
 `METHOD` is the one required value, in any of the forms `make add-method` takes: a path to a `.mthds` file or to a directory of them, a catalog id (`mt_…`), or a published address (`github.com/<owner>/<repo>[/<package>][@<tag>]`). [`add-method.md`](add-method.md) describes each.
@@ -59,7 +59,7 @@ The gesture runs in two halves, like `make add-method`, and nothing is written u
 **Write.**
 
 1. **Scaffold the method** with `add-method`'s write half. If it fails, it removes what it wrote, so the template is exactly as it was and the gesture can be run again.
-2. **Run the bootstrap** with the derived values and `--clean`. It names the project, rewrites the README, `CLAUDE.md`, `AGENTS.md`, `src/site.ts`, the license and the changelog, and removes what only the template needs — the release skill, this gesture, its test, this document, its CI job and the passages describing them.
+2. **Run the bootstrap** with the derived values and `--clean`. It names the project, rewrites the README, `CLAUDE.md`, `AGENTS.md`, `src/site.ts`, the license and the changelog, and removes what only the template needs — this gesture, its test, this document and the passages describing them.
 3. **Write `.env.local`**, unless it already exists (see below).
 4. **Re-sync `package-lock.json`** with `npm install --package-lock-only`, since the package was renamed and CI installs with `npm ci`.
 5. **Run `make all`.**
@@ -87,6 +87,6 @@ The file is created readable by you alone. An existing `.env.local` is yours and
 ## References
 
 - [`add-method.md`](add-method.md) — the scaffold the gesture runs, and its three source kinds.
-- [`ci.md`](ci.md) — how the gesture is proven: the offline fixture test, and the live job this template runs by hand.
+- [`ci.md`](ci.md) — how the gesture is proven: the offline fixture test, and a local run against the live API.
 - `scripts/lib/create.mts` — the behavior, with its helpers unit-tested in `create.test.mts`.
 - `.claude/skills/bootstrap/SKILL.md` — the bootstrap the gesture drives, and its interactive path.

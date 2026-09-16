@@ -21,14 +21,26 @@ The recorded responses are real: they were returned by `api-dev.pipelex.com` for
 
 <!-- template-only:begin -->
 
-## The live create job (template only)
+## Where these workflows run (template only)
 
-`.github/workflows/create-live.yml` runs `make create` for real on a fresh checkout of the template: once with the bundle fixture, once with the `text_stats` package address. It then checks that the project is what the gesture promised — the template's name, the bootstrap, the release skill and the gesture itself gone, `.env.local` holding exactly one base URL line, the one the job ran against — and serves the page with the offline e2e spec, which finds the project's title and the method's form. It runs no method, so it spends no model call.
+This template is developed as the `webapp-js/` directory of the `pipelex-method-apps` mono-repo, and GitHub reads a repository's workflows only at its root, so the workflow files above never run from there. The root carries a twin of each, rendered from them by the root's `make workflows`: the same jobs and steps, run with `working-directory: webapp-js`, with the npm cache keyed on this directory's lock file and the directory's name added to the workflow and job names. The root's `make check` fails when a twin no longer matches its source, so a change to a workflow here is carried to the root by re-rendering it in the same commit. A project copied out of the mono-repo runs these files as they are.
 
-- **Trigger**: by hand only (`workflow_dispatch`), from the Actions tab or with `gh workflow run create-live.yml`. It never runs on a pull request.
-- **Input**: `base_url`, the API the gesture runs against, defaulting to `https://api-dev.pipelex.com` until production serves the form views and `method_ref`.
-- **Secret**: `PIPELEX_API_KEY`, a repository secret holding a key for that API. **When the secret is not set, the job runs nothing**: it succeeds with a warning saying so, in the run's summary and as an annotation. Add the secret under Settings → Secrets and variables → Actions to make the job meaningful.
+## The live half of the proof for `make create` (template only)
 
-The bootstrap removes this workflow, and this section, from every project the template creates: a project has no `make create` to prove.
+No workflow runs `make create` against the live API, because no workflow is given a Pipelex API key. The fixture test above proves what the gesture writes; that it still works against the API is proven by hand, with a local run, before a release that touches the gesture, the scaffold or the shared code an emitted file imports.
+
+Run it twice against `https://api-dev.pipelex.com`, each time in a fresh copy of this directory with its own `git init`, with a key in the shell:
+
+- once with the bundle fixture, `make create METHOD=scripts/lib/fixtures/bundles/receipt-review`;
+- once with a published address, `make create METHOD=github.com/Pipelex/methods/text_stats@v0.1.1`.
+
+The gesture runs `make all` itself, so a red check fails the run. Then check that each copy is what the gesture promised:
+
+- `package.json` no longer carries the template's name;
+- the bootstrap skill, `scripts/create.mts` and `docs/create.md` are gone;
+- `.env.local` holds exactly one `PIPELEX_BASE_URL` line, the one the run used;
+- `make dev` serves a page titled after the method, showing its form, which `npx playwright test e2e/home.spec.ts` also checks.
+
+The run executes no method, so it spends no model call. The copies are discarded afterwards.
 
 <!-- template-only:end -->
