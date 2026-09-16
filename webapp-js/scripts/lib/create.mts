@@ -56,7 +56,7 @@ export const EXIT_OK = 0;
 export const EXIT_FAILED = 1;
 
 /** The template's package name: the gesture runs only while `package.json` still says it. */
-export const TEMPLATE_NAME = "pipelex-method-app";
+export const TEMPLATE_NAME = "pipelex-method-webapp-js";
 
 /** The bootstrap script, relative to the repo root. */
 export const BOOTSTRAP_SCRIPT = ".claude/skills/bootstrap/scripts/bootstrap.mjs";

@@ -1,243 +1,106 @@
-.PHONY: help run dev build start port-check lint format format-check typecheck codegen codegen-check codegen-verify add-method test test-watch test-e2e test-e2e-ui confirm-live-e2e agent-test check clean install lock all use-local use-npm ul un
+.PHONY: help install hooks check check-family check-versions check-workflows workflows lint format format-check typecheck test test-family agent-test build all lock clean use-local use-npm ul un
 
-# ── Arguments ──────────────────────────────────────────────────────────────
-# The gestures take their values as make variables (`make add-method
-# METHOD=… NAME=…`) and hand them to a script as flags. Two rules keep that
-# faithful:
+# The family's root gate. Each template is a directory with its own Makefile,
+# copied out whole into the projects created from it, so every target here
+# either belongs to the family — its one version, the root twins of the
+# templates' workflows, the formatting of the root's own files — or runs the
+# same target in every template directory, stopping at the first failure.
 #
-#   - Only a value given on the command line counts. A variable of the same name
-#     exported by the shell (NAME, TITLE and LICENSE all exist in the wild) is
-#     not a request, so `opt` reads a variable's origin before its value.
-#   - The value reaches the script exactly as typed. `shq` wraps it in single
-#     quotes, closing and escaping any quote inside, and `$(value …)` keeps a `$`
-#     in it from being expanded by make, so a title such as `Bob's "$5" app`
-#     arrives intact.
-#   - A blank value is not given: `NAME=` is how a person clears a value, not
-#     how they ask for an empty one. For a switch, `0` is not given either.
-#
-# `$(call opt,NAME,--name)` expands to `--name '<value>'`, or to nothing.
-shq = '$(subst ','\'',$(1))'
-given = $(if $(filter command line,$(origin $(1))),$(strip $(value $(1))))
-opt = $(if $(call given,$(1)),$(2) $(call shq,$(value $(1))))
-flag = $(if $(filter-out 0,$(call given,$(1))),$(2))
-# Refuse a gesture run without its required variable. Decided by make from the
-# variable's origin and value, so the value itself never reaches a shell line
-# unquoted.
-require = @$(if $(call given,$(1)),:,echo "$(2)"; exit 2)
+# A new template joins the family by being named here. docs/family.md says what
+# else it needs.
+TEMPLATES := webapp-js
+
+# The root's own tooling borrows the first template's installed Prettier and
+# Husky, so the root needs no package manager of its own.
+TOOLS := webapp-js/node_modules/.bin
+
+# The root's own Markdown, scripts and JSON, with every template left out: a
+# template formats its own files, with its own configuration and exclusions.
+# The exclusions are patterns here rather than a root .prettierignore, which an
+# editor opened at the root would apply to the templates' files too.
+ROOT_FORMATTED := "**/*.{md,mjs,json}" $(foreach t,$(TEMPLATES),"!$(t)/**")
+
+# Run `make <target>` in every template, naming each one as it starts. The
+# leading `+` marks the line as a recursive make, which `$(MAKE)` inside a
+# variable does not: without it, `make -n` would print the loop instead of
+# descending, and the sub-makes would get no share of `-j`.
+each = +@set -e; for t in $(TEMPLATES); do echo "── $$t: make $(1)"; $(MAKE) --no-print-directory -C "$$t" $(1); done
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
 
-# ── The app port ───────────────────────────────────────────────────────────
-# Declared once here and exported, so package.json's `dev`/`start` scripts and
-# playwright.config.ts all read the same number. Each of them still defaults to
-# 4300 on its own, so `npm run dev` outside make keeps working. Override it to
-# run this checkout beside one that already holds the port:
-#
-#     make run APP_PORT=4301
-#
-# The name is deliberately not `PORT`. That one is ambient — hosting platforms,
-# other dev servers and shell profiles all export it — and inheriting it would
-# move this server without saying so.
-APP_PORT ?= 4300
-export APP_PORT
+install: ## Install every template's dependencies, then wire the pre-commit hook
+	$(call each,install)
+	@$(MAKE) --no-print-directory hooks
 
-# `next dev` refuses a taken port with a bare EADDRINUSE naming the port and
-# nothing else. In this workspace every branch gets its own worktree and each
-# one runs `make run` on the same port, so the holder is routinely ANOTHER
-# checkout of this same app — which answers on http://localhost:4300 and looks
-# entirely right in a browser. Name the holder rather than print a stack trace.
-#
-# ALLOW_OWN=1 accepts a server started from this directory and still refuses a
-# foreign one. That is the e2e case: Playwright reuses an existing server
-# (`reuseExistingServer` in playwright.config.ts), so without this check a
-# stale worktree on the same port would run the whole suite against another
-# branch's app and report it green.
-port-check:
-	@command -v lsof >/dev/null 2>&1 || exit 0; \
-	pid=$$(lsof -nP -iTCP:$(APP_PORT) -sTCP:LISTEN -t 2>/dev/null | head -1); \
-	if [ -z "$$pid" ]; then exit 0; fi; \
-	cwd=$$(lsof -a -p $$pid -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1); \
-	if [ "$$cwd" = "$(CURDIR)" ]; then \
-		if [ -n "$(ALLOW_OWN)" ]; then exit 0; fi; \
-		echo "Port $(APP_PORT) is already served by this checkout (pid $$pid)."; \
-		echo "Open http://localhost:$(APP_PORT), or stop that server first."; \
-		exit 1; \
-	fi; \
-	echo "Port $(APP_PORT) is held by pid $$pid, running in $${cwd:-an unknown directory}."; \
-	echo "That is not this checkout ($(CURDIR)) — it is serving a different app."; \
-	echo "Leave it alone and use another port, e.g. APP_PORT=4301 on this target."; \
-	exit 1
+# Husky, run from the root, points git at .husky/_ here — the same hooks path a
+# template sets when it is a repository of its own, so the setting agrees with
+# every checkout of this repository. The root's .husky/pre-commit runs each
+# template's own hook from inside that template.
+hooks: ## Wire the root pre-commit hook, which runs each template's own
+	@[ -x $(TOOLS)/husky ] || { echo "Husky is not installed: run make install first."; exit 1; }
+	$(TOOLS)/husky
 
-run: port-check ## Start dev server
-	npm run dev
+check: check-family ## Check the family, then run every template's check (lint, format, typecheck, codegen)
+	$(call each,check)
 
-dev: run ## Alias for run
+check-family: check-versions check-workflows ## Check what belongs to the family: its version, the workflow twins, the root's formatting
+	@[ -x $(TOOLS)/prettier ] || { echo "Prettier is not installed: run make install first."; exit 1; }
+	$(TOOLS)/prettier --check $(ROOT_FORMATTED)
 
-build: ## Production build
-	npm run build
+check-versions: ## Check that every template carries the version in VERSION
+	@node scripts/versions.mjs $(TEMPLATES)
 
-start: port-check ## Start production server
-	npm run start
+check-workflows: ## Check that the root twin of every template workflow is current
+	@node scripts/workflows.mjs --check $(TEMPLATES)
 
-lint: ## Run ESLint
-	npm run lint
+workflows: ## Render the root twin of every template workflow into .github/workflows/
+	@node scripts/workflows.mjs $(TEMPLATES)
 
-format: ## Format code with Prettier
-	npm run format
+lint: ## Run every template's linter
+	$(call each,lint)
 
-format-check: ## Check formatting (CI)
-	npm run format:check
+format: ## Format the root's own files, then every template's
+	$(TOOLS)/prettier --write $(ROOT_FORMATTED)
+	$(call each,format)
 
-typecheck: ## Run TypeScript type checking (app + e2e specs + scripts)
-	npm run typecheck
-	npm run typecheck:e2e
-	npm run typecheck:scripts
+format-check: ## Check the formatting of the root's own files, then every template's
+	$(TOOLS)/prettier --check $(ROOT_FORMATTED)
+	$(call each,format-check)
 
-# Regenerates src/generated/<method>/ from methods/<method>/. Needs PIPELEX_API_KEY
-# and a base URL that serves /v1/validate's form views — for now
-# PIPELEX_BASE_URL=https://api-dev.pipelex.com (see docs/add-method.md).
-# Deliberately OUT of `make all`, for the same reason test-e2e is: key + network.
-codegen: ## Regenerate the typed artifacts in src/generated/ from methods/ (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
-	npm run codegen
+typecheck: ## Run every template's type checks
+	$(call each,typecheck)
 
-# The CI half of the trust chain: pure hashing, no key, no network. Proves each
-# committed tree still agrees with its own lock, and that the .mthds sources it
-# was generated from have not changed since. Part of `make check`.
-codegen-check: ## Verify src/generated/ is current, offline (no API key needed)
-	npm run codegen:check
+test-family: ## Run the tests of the root's own scripts
+	node --test "scripts/*.test.mjs"
 
-# The semantic gate the offline check deliberately cannot be: re-resolves each
-# method live and compares crate fingerprints. Keyed and online, so it stays out
-# of `make all` — run it before a release, or after touching methods/. Wants the
-# same base URL as `codegen`.
-codegen-verify: ## Ask the engine whether the committed crates are still current (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
-	npm run codegen:verify
+test: test-family ## Run the family's tests, then every template's
+	$(call each,test)
 
-# Scaffolds a method into the app: a bundle (a .mthds file or a directory of
-# them, copied into methods/<name>/ unless it is already there), a method on the
-# platform (a catalog id) or one in a published package (an address). It writes
-# the generated tree, the action trio, the narrower, the form and a registry
-# entry, and the manifest for a method that lives elsewhere. One-shot — it never
-# overwrites, and `npm run codegen` is the refresh. Keyed and online, so it stays
-# out of `make all`. Wants the same base URL as `codegen`, which is also the one
-# that resolves a package address. A relative bundle path is read from the
-# directory make runs in.
-add-method: ## Scaffold a method into the app from METHOD=<path/to/bundle | mt_… | github.com/owner/repo[/pkg][@tag]> (needs PIPELEX_API_KEY and, for now, the api-dev base URL)
-	$(call require,METHOD,usage: make add-method METHOD=<path/to/bundle | mt_… | github.com/owner/repo[/pkg][@tag]> [PIPE=<pipe_code>] [NAME=<dir-name>] [LABEL=<label>] [DRY_RUN=1])
-	npm run add-method -- $(call shq,$(value METHOD)) $(call opt,PIPE,--pipe) $(call opt,NAME,--name) $(call opt,LABEL,--label) $(call flag,DRY_RUN,--dry-run)
+agent-test: ## Run every test, silent on success (for agents)
+	@OUTPUT=$$(node --test "scripts/*.test.mjs" 2>&1); STATUS=$$?; if [ $$STATUS -ne 0 ]; then echo "$$OUTPUT"; exit $$STATUS; fi
+	$(call each,agent-test)
 
-# template-only:begin — the bootstrap removes this block, with the gesture it runs.
-# Turns this template into the app for one method, in one go: scaffolds the
-# method, names the project after it (the bootstrap, run with the derived
-# values), writes .env.local from the shell, re-syncs the lock file, runs
-# `make all`, and removes the bootstrap. One-shot, keyed and online, so it stays
-# out of `make all`; docs/create.md is the reference. A relative bundle path is
-# read from the directory make runs in.
-.PHONY: create
-create: ## Turn this template into the app for METHOD=<path/to/bundle | mt_… | address> (one-shot; needs PIPELEX_API_KEY and, for now, the api-dev base URL)
-	$(call require,METHOD,usage: make create METHOD=<path/to/bundle | mt_… | github.com/owner/repo[/pkg][@tag]> [NAME=<package>] [TITLE=<title>] [DESCRIPTION=<text>] [METHOD_NAME=<dir-name>] [PIPE=<pipe_code>] [LABEL=<label>] [AUTHOR_NAME=…] [AUTHOR_EMAIL=…] [REPO_URL=…] [LICENSE=mit|proprietary|<spdx>] [LICENSE_HOLDER=…] [LICENSE_YEAR=…] [DRY_RUN=1])
-	@[ -d node_modules ] || npm install
-	npm run create -- $(call shq,$(value METHOD)) $(call opt,NAME,--name) $(call opt,TITLE,--title) $(call opt,DESCRIPTION,--description) $(call opt,METHOD_NAME,--method-name) $(call opt,PIPE,--pipe) $(call opt,LABEL,--label) $(call opt,AUTHOR_NAME,--author-name) $(call opt,AUTHOR_EMAIL,--author-email) $(call opt,REPO_URL,--repo-url) $(call opt,LICENSE,--license) $(call opt,LICENSE_HOLDER,--license-holder) $(call opt,LICENSE_YEAR,--license-year) $(call flag,DRY_RUN,--dry-run)
-# template-only:end
+build: ## Build every template
+	$(call each,build)
 
-test: ## Run tests (single pass)
-	npm run test
+all: check test build ## Full validation: the family's checks and tests, then every template's check, test and build
 
-test-watch: ## Run tests in watch mode
-	npm run test:watch
+lock: ## Regenerate every template's lock file without installing
+	$(call each,lock)
 
-# OPTIONAL. The live-API specs hit the real Pipelex API (cost an LLM call, need
-# PIPELEX_API_KEY) and auto-skip without a key. Confirmation gate guards against
-# accidental spend; skipped in CI / non-interactive shells, or pass CONFIRM=1.
-confirm-live-e2e:
-	@if [ -z "$$CI" ] && [ -z "$$CONFIRM" ] && [ -t 0 ]; then \
-		printf "⚠️  Playwright e2e runs against the LIVE Pipelex API and costs an LLM call per live spec.\n"; \
-		printf "Continue? [y/N] "; \
-		read ans; \
-		case "$$ans" in [yY]*) ;; *) echo "Aborted."; exit 1 ;; esac; \
-	fi
+clean: ## Remove every template's build artifacts and caches
+	$(call each,clean)
 
-# ALLOW_OWN is a target-specific variable, so it reaches the port-check
-# prerequisite: Playwright reusing THIS checkout's dev server is the point,
-# reusing another one silently is the bug.
-test-e2e test-e2e-ui: ALLOW_OWN = 1
+# The sibling packages sit in the workspace this repository is checked out in,
+# two levels above a template's directory. A template's own `make use-local`
+# takes SIBLINGS_DIR for exactly this; to use siblings anywhere else, run the
+# target inside the template directory with SIBLINGS_DIR set there.
+use-local: ## Install the workspace's pipelex-sdk-js and mthds-form checkouts into every template
+	$(call each,use-local SIBLINGS_DIR=../..)
 
-test-e2e: confirm-live-e2e port-check ## Run OPTIONAL Playwright e2e (LIVE API — needs PIPELEX_API_KEY, costs an LLM call; auto-skips without a key)
-	npm run test:e2e
-
-test-e2e-ui: confirm-live-e2e port-check ## Same as test-e2e, with the Playwright UI runner
-	npm run test:e2e:ui
-
-agent-test: ## Run tests, silent on success (for agents)
-	@OUTPUT=$$(npm run test --silent 2>&1); STATUS=$$?; if [ $$STATUS -ne 0 ]; then echo "$$OUTPUT"; exit $$STATUS; fi
-
-check: lint format-check typecheck codegen-check ## Run lint, format check, type check, and the offline codegen check
-
-all: check test build ## Full validation: check + test + build (excludes e2e — see test-e2e)
-
-install: ## Install dependencies
-	npm install
-
-lock: ## Regenerate package-lock.json without installing
-	npm install --package-lock-only
-
-clean: ## Remove build artifacts and caches
-	rm -rf .next node_modules/.cache
-
-# ── Local Pipelex package development ──────────────────────────────────────
-# By default, `make install` fetches the published `@pipelex/sdk` and
-# `@pipelex/mthds-form` packages from npm. `make use-local` packs and installs
-# the siblings ../pipelex-sdk-js and ../mthds-form so you can develop them and
-# the app side-by-side. `make use-npm` restores the latest published
-# versions and re-pins package.json to them.
-#
-# We use `npm pack` + tarball install rather than a symlink because Next.js
-# 16's Turbopack does not follow symlinked workspace packages — `npm run dev`
-# and `npm run build` both fail with "Module not found" against a symlinked
-# node_modules entry. The tarball install gives us a real directory that
-# Turbopack resolves correctly. Re-run `make use-local` after every edit
-# to pick up changes.
-#
-# Both tarballs go through ONE `npm install` call on purpose: a second
-# `--no-save` install re-reconciles node_modules against the lockfile and can
-# silently revert the first tarball to the registry version.
-#
-# The pack steps pass `--ignore-scripts` on purpose: each sibling's `prepare`
-# script re-runs its build during `npm pack`, and mthds-form's build (tsup)
-# prints to stdout — which would corrupt the captured tarball filename. We
-# build explicitly just before packing, so skipping `prepare` loses nothing.
-
-use-local: ## Pack and install ../pipelex-sdk-js and ../mthds-form into node_modules for local development
-	@if [ ! -d ../pipelex-sdk-js ]; then \
-		echo "ERROR: ../pipelex-sdk-js not found — expected as a sibling directory."; exit 1; \
-	fi
-	@if [ ! -d ../mthds-form ]; then \
-		echo "ERROR: ../mthds-form not found — expected as a sibling directory."; exit 1; \
-	fi
-	@echo "Building ../pipelex-sdk-js so dist/ is up-to-date..."
-	cd ../pipelex-sdk-js && npm run build
-	@echo "Packing ../pipelex-sdk-js into a tarball..."
-	@cd ../pipelex-sdk-js && rm -f pipelex-sdk-*.tgz && TARBALL=$$(npm pack --silent --ignore-scripts) && mv $$TARBALL /tmp/pipelex-sdk-local.tgz
-	@echo "Building ../mthds-form so dist/ is up-to-date..."
-	cd ../mthds-form && npm run build
-	@echo "Packing ../mthds-form into a tarball..."
-	@cd ../mthds-form && rm -f pipelex-mthds-form-*.tgz && TARBALL=$$(npm pack --silent --ignore-scripts) && mv $$TARBALL /tmp/pipelex-mthds-form-local.tgz
-	rm -rf node_modules/@pipelex/sdk node_modules/@pipelex/mthds-form
-	npm install /tmp/pipelex-sdk-local.tgz /tmp/pipelex-mthds-form-local.tgz --no-save --silent
-	@rm -f /tmp/pipelex-sdk-local.tgz /tmp/pipelex-mthds-form-local.tgz
-	@echo "Now using local ../pipelex-sdk-js and ../mthds-form (tarball installs). Re-run after every edit. 'make use-npm' to switch back."
-
-# The `@latest` tag is load-bearing. A bare `npm install @pipelex/sdk` re-resolves
-# the range already in package.json, so coming off `make use-local` with a stale
-# caret range restores that range's newest match rather than the current release —
-# silently DOWNGRADING, since both packages are pre-1.0 and `^0.a.b` will not
-# cross a minor. `@latest` fetches the published release and rewrites the range
-# to match it.
-use-npm: ## Restore the latest npm-published @pipelex/sdk and @pipelex/mthds-form packages
-	rm -rf node_modules/@pipelex/sdk node_modules/@pipelex/mthds-form
-	npm install @pipelex/sdk@latest @pipelex/mthds-form@latest
-	@echo "Restored npm-published @pipelex/sdk $$(node -p "require('./node_modules/@pipelex/sdk/package.json').version") and @pipelex/mthds-form $$(node -p "require('./node_modules/@pipelex/mthds-form/package.json').version"). Run 'make use-local' to switch back."
+use-npm: ## Restore the npm-published @pipelex packages in every template
+	$(call each,use-npm)
 
 ul: use-local ## Alias for use-local
 un: use-npm ## Alias for use-npm
