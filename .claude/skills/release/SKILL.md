@@ -18,14 +18,15 @@ This skill releases the template from inside the Pipelex workspace, and the boot
 
 ## What ships
 
-**Nothing is published.** That is the whole answer: `package.json` declares `"private": true`, so nothing goes to npm. `.github/workflows/` holds `lint-check.yml` and `tests-check.yml`, and both open with `on: pull_request:` — no workflow in this repo fires on a push to `main`, so the merge triggers no build, no publish and no tagger. The repo carries no tags and no GitHub Releases, and none are made by hand. What the merge produces is the template at its new version on `main`, which is this repo's default branch and therefore what GitHub's **Use this template** copies into a new repository.
+**Nothing is published.** That is the whole answer: `package.json` declares `"private": true`, so nothing goes to npm. `.github/workflows/` holds `lint-check.yml` and `tests-check.yml`, which both open with `on: pull_request:`, and `create-live.yml`, which opens with `on: workflow_dispatch:` and runs when someone starts it by hand. No workflow in this repo fires on a push to `main`, so the merge triggers no build, no publish and no tagger. The repo carries no tags and no GitHub Releases, and none are made by hand. What the merge produces is the template at its new version on `main`, which is this repo's default branch and therefore what GitHub's **Use this template** copies into a new repository.
 
-The opening sentence is the declaration `ledger land` reads, spelled exactly so, and the `git show origin/main:package.json` below is where it reads the version from. The landing has no publish to verify, so it verifies the merge commit is on `main` and that `package.json` there spells the version the release branch spells, then closes the release item on those readings. By hand, from anywhere, the same readings are:
+The opening sentence is the declaration `ledger land` reads, spelled exactly so, and the `git show origin/main:package.json` below is where it reads the version from. The landing has no publish to verify. Instead it checks three things: the merge commit is on `main`, no workflow in that commit runs on the merge, and `package.json` spells the release branch's version in the merge commit but not in its first parent. It then closes the release item on those readings. A workflow that starts firing on a push to `main` stops the landing until this section names it. By hand, from anywhere, the same readings are:
 
 ```bash
 cd <main> && gh pr view <number> --json state,mergedAt,mergeCommit   # MERGED, and the merge commit
 git -C <main> fetch --prune origin
 git -C <main> show origin/main:package.json | grep '"version"'   # X.Y.Z
+git -C <main> show <sha>^1:package.json | grep '"version"'   # the version before the merge, never X.Y.Z
 ```
 
 ## Version files and the lock
