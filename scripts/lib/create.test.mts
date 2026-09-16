@@ -25,9 +25,11 @@ import {
   BOOTSTRAP_DIR,
   bootstrapArgs,
   deriveIdentity,
+  dropEnvLine,
   ENV_FILE,
   oneLine,
   parseCreateArgs,
+  planEnvFile,
   renderEnvFile,
   runCreate,
   setEnvLine,
@@ -155,6 +157,27 @@ describe("deriveIdentity", () => {
     );
   });
 
+  it("reads a blank catalog name or description as not given", () => {
+    const plan = planOf({
+      catalog: { name: "  ", description: "" },
+      description: "Read receipts.",
+    });
+    expect(deriveIdentity(plan, NONE)).toEqual({
+      name: "receipt-review",
+      title: "Receipt Review",
+      description: "Read receipts.",
+    });
+    expect(
+      deriveIdentity(
+        planOf({
+          catalog: { name: "", description: " " },
+          pipeDescriptions: { "receipt_review.review_receipts": "Summarize each." },
+        }),
+        NONE,
+      ).description,
+    ).toBe("Summarize each.");
+  });
+
   it("lets every value be overridden, and titles an overridden name after it", () => {
     expect(
       deriveIdentity(planOf({ description: "Read receipts." }), {
@@ -187,8 +210,10 @@ describe("the env file", () => {
     "",
   ].join("\n");
 
+  const DEV = "https://api-dev.pipelex.com";
+
   it("copies the shell's base URL and key over the example's lines, in place", () => {
-    expect(renderEnvFile(EXAMPLE, { baseUrl: "https://api-dev.pipelex.com", key: "sk-1" })).toBe(
+    expect(renderEnvFile(EXAMPLE, { baseUrl: DEV, key: "sk-1" })).toBe(
       [
         "# Pipelex API endpoint and credentials.",
         "PIPELEX_BASE_URL=https://api-dev.pipelex.com",
@@ -200,19 +225,52 @@ describe("the env file", () => {
     );
   });
 
-  it("keeps the example's base URL and leaves the key empty when the shell sets neither", () => {
-    expect(renderEnvFile(EXAMPLE, {})).toBe(EXAMPLE);
+  it("leaves the key empty when nothing supplied one", () => {
+    expect(renderEnvFile(EXAMPLE, { baseUrl: "https://api.pipelex.com" })).toBe(EXAMPLE);
+  });
+
+  it("leaves out a key another env file supplies, so this one does not hide it", () => {
+    const written = renderEnvFile(EXAMPLE, { baseUrl: DEV, keyFile: ".env" });
+    expect(written).toBe(
+      [
+        "# Pipelex API endpoint and credentials.",
+        `PIPELEX_BASE_URL=${DEV}`,
+        "# PIPELEX_API_KEY is read from .env; a line here would override it.",
+        "",
+        "NEXT_PUBLIC_EXECUTION_MODE=durable",
+        "",
+      ].join("\n"),
+    );
+    expect(written).not.toMatch(/^\s*(export\s+)?PIPELEX_API_KEY\s*=/m);
+    expect(dropEnvLine("A=1\nexport A=2\nB=3\n", "A", "gone")).toBe("# gone\nB=3\n");
   });
 
   it("writes exactly one base URL line, whatever the example held", () => {
     const doubled = `${EXAMPLE}export PIPELEX_BASE_URL=https://elsewhere.example\n`;
-    const written = renderEnvFile(doubled, { baseUrl: "https://api-dev.pipelex.com" });
+    const written = renderEnvFile(doubled, { baseUrl: DEV });
     expect(written.match(/PIPELEX_BASE_URL=/g)).toHaveLength(1);
-    expect(written).toContain("PIPELEX_BASE_URL=https://api-dev.pipelex.com\n");
+    expect(written).toContain(`PIPELEX_BASE_URL=${DEV}\n`);
 
-    const none = renderEnvFile("# nothing\n", {});
+    const none = renderEnvFile("# nothing\n", { baseUrl: DEV });
     expect(none.match(/PIPELEX_BASE_URL=/g)).toHaveLength(1);
-    expect(renderEnvFile(null, {})).toContain("PIPELEX_BASE_URL=https://api.pipelex.com\n");
+    expect(renderEnvFile(null, { baseUrl: DEV })).toContain(`PIPELEX_BASE_URL=${DEV}\n`);
+  });
+
+  it("says where each value it writes came from", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "create-env-"));
+    try {
+      const fromFiles = await planEnvFile(root, {}, DEV, { baseUrl: ".env", key: ".env" });
+      expect(fromFiles.action).toBe("write");
+      expect(fromFiles.notes.join("\n")).toContain(`PIPELEX_BASE_URL=${DEV} (from .env)`);
+      expect(fromFiles.notes.join("\n")).toContain("the key stays in .env");
+
+      const fromShell = await planEnvFile(root, { baseUrl: DEV, key: "sk-1" }, DEV, {});
+      expect(fromShell.notes.join("\n")).toContain("(from your shell), and PIPELEX_API_KEY from");
+      if (fromShell.action !== "write") throw new Error("expected a write");
+      expect(fromShell.content).toContain("PIPELEX_API_KEY=sk-1\n");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("refuses a value an env file cannot hold", () => {
@@ -319,7 +377,13 @@ describe("runCreate", () => {
       calls,
       repoRoot: root,
       shell,
-      addMethod: { repoRoot: root, cwd: root, client: apiClient, baseUrl: "https://api.example" },
+      // A real run's base URL is the shell's when the shell sets one.
+      addMethod: {
+        repoRoot: root,
+        cwd: root,
+        client: apiClient,
+        baseUrl: shell.baseUrl ?? "https://api.example",
+      },
       npm: { command: "npm", args: [] },
       run: (command, args) => {
         calls.push({
@@ -441,12 +505,22 @@ describe("runCreate", () => {
     expect(output.join("\n")).toContain("but .env.local says https://api.pipelex.com");
   });
 
-  it("writes no key the shell did not set", async () => {
+  it("writes no key the shell did not set, and the base URL the gesture ran against", async () => {
     expect(await runCreate([RECEIPTS_DIR], deps({}, {}))).toBe(0);
 
     const env = await readFile(path.join(root, ENV_FILE), "utf-8");
     expect(env).toContain("PIPELEX_API_KEY=\n");
-    expect(env).toContain("PIPELEX_BASE_URL=https://api.pipelex.com\n");
+    expect(env).toContain("PIPELEX_BASE_URL=https://api.example\n");
+  });
+
+  it("does not hide a key and base URL that came from .env", async () => {
+    const d = { ...deps({}, {}), envFiles: { baseUrl: ".env", key: ".env" } };
+    expect(await runCreate([RECEIPTS_DIR], d)).toBe(0);
+
+    const env = await readFile(path.join(root, ENV_FILE), "utf-8");
+    expect(env).not.toMatch(/^\s*(export\s+)?PIPELEX_API_KEY\s*=/m);
+    expect(env).toContain("PIPELEX_BASE_URL=https://api.example\n");
+    expect(output.join("\n")).toContain("the key stays in .env");
   });
 
   it("keeps the bootstrap and names what is left when make all is red", async () => {

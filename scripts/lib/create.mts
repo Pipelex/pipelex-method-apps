@@ -207,19 +207,24 @@ export function oneLine(text: string): string {
  */
 export function deriveIdentity(plan: AddMethodPlan, args: CreateArgs): Identity {
   const name = args.name ?? plan.names.slug;
-  const title = args.title ?? plan.catalog?.name.trim() ?? titleFromName(name);
+  const title = present(args.title) ?? present(plan.catalog?.name) ?? titleFromName(name);
   const { prose } = plan.fetched.contracts;
-  const described =
-    args.description ??
-    plan.catalog?.description ??
-    prose.description ??
-    prose.pipeDescriptions[plan.scaffold.pipe.ref] ??
-    null;
   const description =
-    described !== null && oneLine(described) !== ""
-      ? oneLine(described)
-      : `Runs the ${title} method through the Pipelex API.`;
-  return { name, title: oneLine(title), description };
+    present(args.description) ??
+    present(plan.catalog?.description) ??
+    present(prose.description) ??
+    present(prose.pipeDescriptions[plan.scaffold.pipe.ref]) ??
+    `Runs the ${title} method through the Pipelex API.`;
+  return { name, title, description };
+}
+
+/**
+ * A value on one line, or nothing when it is blank: the platform stores an empty
+ * name or description as readily as a missing one, and both mean "not given".
+ */
+function present(value: string | null | undefined): string | undefined {
+  const line = oneLine(value ?? "");
+  return line === "" ? undefined : line;
 }
 
 // ── The env file ────────────────────────────────────────────────────────────
@@ -228,6 +233,22 @@ export function deriveIdentity(plan: AddMethodPlan, args: CreateArgs): Identity 
 export interface ShellEnv {
   baseUrl?: string;
   key?: string;
+}
+
+/** The env file each value was read from, when the shell did not set it. */
+export interface EnvFiles {
+  baseUrl?: string;
+  key?: string;
+}
+
+/** What `.env.local` is written with. */
+export interface EnvValues {
+  /** The base URL the gesture ran against, whatever set it. */
+  baseUrl: string;
+  /** The key, when the shell set it. */
+  key?: string;
+  /** The env file the key was read from, when the shell did not set it. */
+  keyFile?: string;
 }
 
 /** What the gesture does about `.env.local`. */
@@ -267,17 +288,46 @@ export function setEnvLine(text: string, key: string, value: string): string {
 }
 
 /**
- * The env file, written from the example with the shell's values: the base URL
- * the shell sets, else the example's; the key only when the shell sets one.
- * The base URL line is there exactly once either way.
+ * Replace every assignment of `key` in dotenv text with one comment line, where
+ * the first assignment was, so the file no longer sets it at all.
  */
-export function renderEnvFile(example: string | null, shell: ShellEnv): string {
-  let text = example ?? MINIMAL_ENV;
-  const exampleBase = new RegExp(`^\\s*(?:export\\s+)?${BASE_URL_KEY}\\s*=\\s*(.*)$`, "m")
-    .exec(text)?.[1]
-    ?.trim();
-  text = setEnvLine(text, BASE_URL_KEY, shell.baseUrl ?? (exampleBase || DEFAULT_API_BASE_URL));
-  if (shell.key !== undefined) text = setEnvLine(text, API_KEY_KEY, shell.key);
+export function dropEnvLine(text: string, key: string, comment: string): string {
+  const assigns = new RegExp(`^\\s*(export\\s+)?${key}\\s*=`);
+  const lines = text.replace(/\r\n/g, "\n").replace(/\n$/, "").split("\n");
+  let seen = false;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (!assigns.test(line)) {
+      kept.push(line);
+    } else if (!seen) {
+      kept.push(`# ${comment}`);
+      seen = true;
+    }
+  }
+  return `${kept.join("\n")}\n`;
+}
+
+/**
+ * The env file, written from the example. `.env.local` is read before every
+ * other env file and its first assignment wins even when empty, so it must not
+ * assign what another file supplied, or it hides it:
+ *
+ * - the base URL is always the one the gesture ran against, on exactly one line;
+ * - the key is copied when the shell set it; when it came from another env file,
+ *   the line is left out so that file keeps supplying it, and the secret is not
+ *   copied; otherwise the example's empty line stays.
+ */
+export function renderEnvFile(example: string | null, values: EnvValues): string {
+  let text = setEnvLine(example ?? MINIMAL_ENV, BASE_URL_KEY, values.baseUrl);
+  if (values.key !== undefined) {
+    text = setEnvLine(text, API_KEY_KEY, values.key);
+  } else if (values.keyFile !== undefined) {
+    text = dropEnvLine(
+      text,
+      API_KEY_KEY,
+      `${API_KEY_KEY} is read from ${values.keyFile}; a line here would override it.`,
+    );
+  }
   return text;
 }
 
@@ -290,6 +340,7 @@ export async function planEnvFile(
   repoRoot: string,
   shell: ShellEnv,
   effectiveBaseUrl: string,
+  files: EnvFiles = {},
 ): Promise<EnvPlan> {
   const envPath = path.join(repoRoot, ENV_FILE);
   if (existsSync(envPath)) {
@@ -309,13 +360,22 @@ export async function planEnvFile(
 
   const examplePath = path.join(repoRoot, ENV_EXAMPLE);
   const example = existsSync(examplePath) ? await readFile(examplePath, "utf-8") : null;
-  const content = renderEnvFile(example, shell);
+  const keyFile = shell.key === undefined ? files.key : undefined;
+  const content = renderEnvFile(example, { baseUrl: effectiveBaseUrl, key: shell.key, keyFile });
+  const baseOrigin =
+    shell.baseUrl !== undefined
+      ? "from your shell"
+      : files.baseUrl !== undefined
+        ? `from ${files.baseUrl}`
+        : "the default";
+  const keyNote =
+    shell.key !== undefined
+      ? `, and ${API_KEY_KEY} from your shell.`
+      : keyFile !== undefined
+        ? `, and no ${API_KEY_KEY} line: the key stays in ${keyFile}, which a line here would hide.`
+        : `, and an empty ${API_KEY_KEY} — set one before \`make dev\`.`;
   const notes = [
-    `${ENV_FILE} is written with ${BASE_URL_KEY}=${effectiveBaseUrl}` +
-      (shell.baseUrl !== undefined ? " (from your shell)" : " (the default)") +
-      (shell.key !== undefined
-        ? `, and ${API_KEY_KEY} from your shell.`
-        : `, and no ${API_KEY_KEY} — set one before \`make dev\`.`),
+    `${ENV_FILE} is written with ${BASE_URL_KEY}=${effectiveBaseUrl} (${baseOrigin})${keyNote}`,
   ];
   return { action: "write", content, notes };
 }
@@ -329,6 +389,8 @@ export interface CreateDeps {
   repoRoot: string;
   /** What the shell set, before any env file was read. */
   shell: ShellEnv;
+  /** The env file each value the shell did not set was read from. */
+  envFiles?: EnvFiles;
   /** The client, base URL and bundle-path base `add-method` runs with. */
   addMethod: AddMethodDeps;
   run: RunCommand;
@@ -418,15 +480,29 @@ export const runInherited: RunCommand = (command, args, cwd) => {
 
 /**
  * The deps a real run uses. The shell's own values are read first, because the
- * env file loaded next would otherwise be indistinguishable from them — and the
- * gesture copies only what the shell set.
+ * env files loaded next would otherwise be indistinguishable from them — and
+ * the gesture copies a key only from the shell. For a value the shell did not
+ * set, the file it came from is recorded, so `.env.local` does not hide it.
  */
 export function resolveCreateDeps(repoRoot: string = REPO_ROOT): CreateDeps {
   const shell: ShellEnv = {
     baseUrl: process.env.PIPELEX_BASE_URL || undefined,
     key: process.env.PIPELEX_API_KEY || undefined,
   };
-  loadEnvConfig(repoRoot, false, { info: () => {}, error: console.error });
+  const { loadedEnvFiles } = loadEnvConfig(repoRoot, false, {
+    info: () => {},
+    error: console.error,
+  });
+  // The files come in precedence order, and the first one assigning a
+  // variable is the one that set it — even to an empty value.
+  const fileOf = (variable: string): string | undefined => {
+    const file = loadedEnvFiles.find((loaded) => loaded.env[variable] !== undefined);
+    return file?.env[variable] ? file.path : undefined;
+  };
+  const envFiles: EnvFiles = {
+    baseUrl: shell.baseUrl === undefined ? fileOf(BASE_URL_KEY) : undefined,
+    key: shell.key === undefined ? fileOf(API_KEY_KEY) : undefined,
+  };
   if (!process.env.PIPELEX_API_KEY) {
     throw new CreateError(
       `${API_KEY_KEY} is not set. Export it in your shell — create copies it into ${ENV_FILE} ` +
@@ -437,6 +513,7 @@ export function resolveCreateDeps(repoRoot: string = REPO_ROOT): CreateDeps {
   return {
     repoRoot,
     shell,
+    envFiles,
     addMethod: resolveDeps(repoRoot),
     run: runInherited,
     npm:
@@ -466,7 +543,7 @@ async function runCreateInner(argv: readonly string[], given?: CreateDeps): Prom
     { nameFlag: "--method-name" },
   );
   const identity = deriveIdentity(plan, args);
-  const envPlan = await planEnvFile(repoRoot, deps.shell, deps.addMethod.baseUrl);
+  const envPlan = await planEnvFile(repoRoot, deps.shell, deps.addMethod.baseUrl, deps.envFiles);
   const bootstrap = bootstrapArgs(repoRoot, identity, args);
 
   console.log(`create: ${identity.title}`);

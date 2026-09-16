@@ -48,7 +48,7 @@ The gesture runs in two halves, like `make add-method`, and nothing is written u
 **Read-only.**
 
 1. Refuse anything but the un-bootstrapped template.
-2. Read `PIPELEX_BASE_URL` and `PIPELEX_API_KEY` from the shell first, then load `.env.local`. The key must be set by one of the two.
+2. Read `PIPELEX_BASE_URL` and `PIPELEX_API_KEY` from the shell first, then load the env files Next.js reads (`.env.local`, `.env`, and their mode-specific variants), noting which file supplied each value the shell did not set. The key must be set by one of them.
 3. Run `add-method`'s read-only half: fetch the method, choose the pipe, derive every name, refuse every collision, and render every file in memory.
 4. Derive the project's name, title and description.
 5. Plan `.env.local`.
@@ -69,10 +69,10 @@ A failure after step 1 cannot be undone by running the gesture again, because th
 
 ## The key and the base URL
 
-`.env.local` is written only when it does not exist, from `.env.example`, with:
+`.env.local` is written only when it does not exist, from `.env.example`. Next.js reads it before every other env file, and the first file that assigns a variable wins even when the value is empty, so the gesture writes it such that it hides nothing another file supplies:
 
-- **exactly one `PIPELEX_BASE_URL` line**: the value your shell exports, or the example's default when it exports none. Any other assignment of it is dropped, so the file can never hold two;
-- **`PIPELEX_API_KEY`** set to the value your shell exports, or left empty when it exports none — in which case the key came from nowhere the gesture may copy, and you set it before `make dev`.
+- **exactly one `PIPELEX_BASE_URL` line**, holding the base URL the gesture ran against — the one your shell exports, the one an env file such as `.env` sets, or the default when neither does. Any other assignment of it is dropped, so the file can never hold two;
+- **`PIPELEX_API_KEY`** set to the value your shell exports. When the key came from another env file instead, `.env.local` carries no `PIPELEX_API_KEY` line at all, only a comment naming that file, so the file keeps supplying it and the secret is not copied a second time.
 
 The file is created readable by you alone. An existing `.env.local` is yours and is never touched; when your shell exports a base URL the file disagrees with, the plan says so, because the app reads the file whenever the shell does not set the variable.
 
