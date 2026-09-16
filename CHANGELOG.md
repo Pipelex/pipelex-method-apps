@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.2.0] - 2026-09-16
+
+### Highlights
+
+**The repository is now a family of templates.** Each template is a directory of its own, `webapp-js/` first, and a project starts as a copy of that directory. **The web app is safer by default**: it listens on loopback, so it no longer serves methods billed to the developer's API key to every network the machine is on, and it runs on a Next.js release clear of two critical remote-code-execution advisories.
 
 ### Changed
 
