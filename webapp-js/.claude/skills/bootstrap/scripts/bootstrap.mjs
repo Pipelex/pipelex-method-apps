@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Turn the pipelex-method-app template into a real project.
+ * Turn the pipelex-method-webapp-js template into a real project.
  *
  * This is the deterministic engine behind the `/bootstrap` skill. It does the
  * mechanical, error-prone part — the project's name and title, its description,
@@ -20,10 +20,10 @@
  *    inside markup.
  *
  * A project does not inherit what only the template needs. The files of that
- * kind are removed whole (`REMOVALS`: the template's `release` skill, and the
- * `make create` gesture with its test, its doc and its CI job), and the passages
- * of shared files that describe them sit between `template-only:begin` and
- * `template-only:end` markers, which are removed with everything between them.
+ * kind are removed whole (`REMOVALS`: the `make create` gesture with its test
+ * and its doc), and the passages of shared files that describe them sit between
+ * `template-only:begin` and `template-only:end` markers, which are removed with
+ * everything between them.
  *
  * Every file it writes goes through the repo's own Prettier when Prettier is
  * installed, so `make all` is green straight after a run. The script only
@@ -40,9 +40,10 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 // The template's placeholders, in their two spellings.
-export const TEMPLATE_NAME = "pipelex-method-app"; // npm package name / repo slug
+export const TEMPLATE_NAME = "pipelex-method-webapp-js"; // npm package name
 export const TEMPLATE_TITLE = "Pipelex Method App"; // human-facing display name
-export const TEMPLATE_URL = "https://github.com/Pipelex/pipelex-method-app";
+// The template's home: its directory in the pipelex-method-apps mono-repo.
+export const TEMPLATE_URL = "https://github.com/Pipelex/pipelex-method-apps/tree/main/webapp-js";
 
 // Fresh projects restart here — package.json and CHANGELOG.md must agree.
 export const RESET_VERSION = "0.1.0";
@@ -52,18 +53,17 @@ const CLAUDE_DESCRIPTION =
   "A Next.js 16 app that runs MTHDS methods through the [Pipelex](https://pipelex.com) API with [`@pipelex/sdk`](https://www.npmjs.com/package/@pipelex/sdk), rendering each method's input form and result view from its own contract.";
 
 // CLAUDE.md's template-only charter paragraph, stripped by --clean.
-const CHARTER_MARKER = "This repo is a **template**.";
+const CHARTER_MARKER = "This directory is a **template**.";
 
-// What the template carries for itself and a project does not: the release
-// skill releases the template from inside the Pipelex workspace, and
-// `make create` turns the template into a project — once, which is this run.
+// What the template carries for itself and a project does not: `make create`
+// turns the template into a project — once, which is this run. The template's
+// release skill is not here: it releases the whole mono-repo and lives at its
+// root, outside the directory a project is copied from.
 export const REMOVALS = [
-  ".claude/skills/release",
   "scripts/create.mts",
   "scripts/lib/create.mts",
   "scripts/lib/create.test.mts",
   "docs/create.md",
-  ".github/workflows/create-live.yml",
 ];
 
 // The npm script of the gesture REMOVALS takes away.

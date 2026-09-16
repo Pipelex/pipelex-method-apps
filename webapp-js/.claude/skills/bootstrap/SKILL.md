@@ -1,11 +1,11 @@
 ---
 name: bootstrap
-description: Bootstrap this pipelex-method-app template into a real project — names the package, writes the app's title and description into src/site.ts, renders the project's own README, sets author, repo URL and license, resets the version and changelog, removes what only the template needs (its release skill and the make create gesture), then syncs package-lock.json and runs the checks. Use this right after creating a repo from the template, or whenever the user says "bootstrap", "set up this template", "rename the project", "initialize the project", "replace the placeholders", "give this project a name", or "make this my own".
+description: Bootstrap this pipelex-method-webapp-js template into a real project — names the package, writes the app's title and description into src/site.ts, renders the project's own README, sets author, repo URL and license, resets the version and changelog, removes what only the template needs (the make create gesture), then syncs package-lock.json and runs the checks. Use this right after copying the template into a new project, or whenever the user says "bootstrap", "set up this template", "rename the project", "initialize the project", "replace the placeholders", "give this project a name", or "make this my own".
 ---
 
 # Bootstrap Workflow
 
-This repo is a GitHub **template**. A fresh copy still carries the template's identity: the npm package name `pipelex-method-app` (in `package.json`, `package-lock.json`, and the headings of `CLAUDE.md` and `AGENTS.md`), the display title `Pipelex Method App` and the template's description (in `src/site.ts`, which the page heading, the browser title and the meta description all read), a README about the template, a changelog chronicling the template, the template's MIT license, and a `release` skill that releases the template from inside the Pipelex workspace. This skill turns all of that into the user's project identity in one reviewable pass, then proves the result still passes CI's gates. It adds no method; `make add-method` does that afterwards.
+This directory is a **template**, copied out of the `webapp-js/` directory of the `pipelex-method-apps` mono-repo. A fresh copy still carries the template's identity: the npm package name `pipelex-method-webapp-js` (in `package.json`, `package-lock.json`, and the headings of `CLAUDE.md` and `AGENTS.md`), the display title `Pipelex Method App` and the template's description (in `src/site.ts`, which the page heading, the browser title and the meta description all read), a README about the template, a changelog pointing at the family's, the template's MIT license, and the `make create` gesture. This skill turns all of that into the user's project identity in one reviewable pass, then proves the result still passes CI's gates. It adds no method; `make add-method` does that afterwards.
 
 The mechanical part is done by a bundled script, `scripts/bootstrap.mjs`. It is deterministic, needs nothing beyond Node and the repo's own Prettier, and supports `--dry-run`, so you can show the plan before touching anything. **Your job in this skill is to collect good inputs, preview, run the script, and verify.** Walk the user through it; confirm before the steps that change files.
 
@@ -16,7 +16,7 @@ The mechanical part is done by a bundled script, `scripts/bootstrap.mjs`. It is 
 Confirm this is an un-bootstrapped template and the tree is clean enough to work in:
 
 1. Read the `"name"` field at the top of `package.json`.
-   - If it is `"pipelex-method-app"`: this is a fresh template — continue.
+   - If it is `"pipelex-method-webapp-js"`: this is a fresh template — continue.
    - If it is anything else: it looks **already bootstrapped**, and the script refuses to run unless `--force` is passed. Tell the user and ask whether to proceed; only add `--force` to the commands below after they explicitly confirm. Warn them what a re-run means: the README and the changelog are rendered again from scratch, and a license **type** change does not restore the LICENSE wording the first run already replaced.
 2. Run `git status --short`. If the tree is dirty, mention it — bootstrap leaves its edits **unstaged** for the user's own review, so a noisy starting point is worth flagging.
 3. Check that `node_modules/` exists; if not, run `make install` first. The script formats what it writes with the repo's Prettier, and Step 5's `make all` needs the whole toolchain.
@@ -84,11 +84,11 @@ Re-run the exact same command **without** `--dry-run`. The script:
 - writes the title and description into `src/site.ts`
 - applies the license choice to `LICENSE`
 - rewrites `CHANGELOG.md` to a fresh `v0.1.0` entry dated today
-- removes what only the template needs: `.claude/skills/release/`, which releases the template from inside the Pipelex workspace, and the `make create` gesture — `scripts/create.mts`, `scripts/lib/create.mts` and its test, `docs/create.md` and `.github/workflows/create-live.yml` — and drops the `create` script from `package.json`
+- removes what only the template needs, the `make create` gesture — `scripts/create.mts`, `scripts/lib/create.mts` and its test, and `docs/create.md` — and drops the `create` script from `package.json`
 - strips the template-only passages, which describe that gesture, from the `Makefile`, `CLAUDE.md`, `AGENTS.md` and `docs/ci.md`: each passage sits between a `template-only:begin` line and a `template-only:end` line, and goes with both of them
 - formats every file it writes with the repo's Prettier
 
-It deliberately does **not** touch git, run `npm install`, run the checks, add a method, or modify `node_modules/`, `package-lock.json`, `methods/` or `src/generated/`; in `.github/` it removes the create workflow and changes nothing else. It also does not remove this skill; Step 6 does.
+It deliberately does **not** touch git, run `npm install`, run the checks, add a method, or modify `node_modules/`, `package-lock.json`, `methods/`, `src/generated/` or anything in `.github/`. It also does not remove this skill; Step 6 does.
 
 **Heads-up — file state changed on disk.** If you need a manual `Edit` afterward, **re-read the file first** — a pre-run read is stale, and an `Edit` against it fails with "modified since read." The script is meant to cover every placeholder, so a manual edit is a sign the script should handle that case instead.
 
@@ -128,5 +128,5 @@ Finally, give the user a short summary:
 - **Always dry-run before the real run.** When the user supplied every input up front and asked to proceed, the dry-run output still gets shown.
 - **Re-sync `package-lock.json`.** Renaming the package makes the lock stale; `npm install --package-lock-only` is what keeps CI's `npm ci` green.
 - **Don't stop on a red check.** A failing `make all` here means CI will fail too — fix the root cause and re-run.
-- **Don't edit `.github/` workflows.** The ones a project keeps are generic to any project created from the template; the script removes `create-live.yml`, which exercises the template's own create gesture, and leaves the rest alone.
+- **Don't edit `.github/` workflows.** They are generic to any project created from the template, and the script leaves them alone.
 - If any step fails or the user wants to abort, stop immediately and leave the tree in a state they can inspect — don't push forward through errors.
