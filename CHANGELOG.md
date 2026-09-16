@@ -8,6 +8,10 @@
 - **The web app template's package is `pipelex-method-webapp-js` (Breaking)**: `make create` and the bootstrap run only while `package.json` carries that name, and a created project's first changelog entry links the template's directory.
 - **`make use-local` takes `SIBLINGS_DIR`**: the sibling `pipelex-sdk-js` and `mthds-form` checkouts are built from the directory given, and from the parent directory when none is.
 
+### Fixed
+
+- **`make create` on a busy machine**: the web app template's tests that spawn `make`, or run the bootstrap script, allow a minute each instead of five seconds, so the gesture's closing `make all` no longer fails, and leaves the project half-finished, when the machine is loaded.
+
 ### Removed
 
 - **The live `make create` workflow**: no workflow runs the gesture against the API, because none is given an API key. The template's `docs/ci.md` describes the local run that takes its place.

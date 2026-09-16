@@ -18,6 +18,12 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { REPO_ROOT } from "./shared.mts";
 
+// Every test here spawns `make`, some of them many times over, and a spawn is
+// slow on a busy machine. A project's very first `make all` runs this suite on
+// whatever machine created it, so vitest's 5-second default would fail that run
+// whenever the machine is loaded: each block takes a budget sized for that.
+const SPAWNS = { timeout: 60_000 };
+
 /** Run make in the repo with a clean make environment, plus `env`. */
 function make(args: readonly string[], env: Record<string, string> = {}) {
   // A parent make (`make all NAME=x`) passes its own command-line variables
@@ -49,7 +55,7 @@ function npmLine(vars: readonly string[], env: Record<string, string> = {}): str
   return line!.replace(/\s+/g, " ").trim();
 }
 
-describe("the Makefile's gesture arguments", () => {
+describe("the Makefile's gesture arguments", SPAWNS, () => {
   it("passes the values given on the command line, as flags", () => {
     expect(npmLine(["METHOD=bundles/cv", "NAME=cv", "PIPE=screen", "DRY_RUN=1"])).toBe(
       "npm run add-method -- 'bundles/cv' --pipe 'screen' --name 'cv' --dry-run",
@@ -85,7 +91,7 @@ describe("the Makefile's gesture arguments", () => {
   });
 });
 
-describe("the Makefile's sibling checkouts", () => {
+describe("the Makefile's sibling checkouts", SPAWNS, () => {
   /** The directories `make use-local <vars>` would build, in order. */
   function builtDirs(vars: readonly string[], env: Record<string, string> = {}): string[] {
     const { status, stdout, stderr } = make(["-n", "use-local", ...vars], env);
@@ -120,7 +126,7 @@ describe("the Makefile's sibling checkouts", () => {
   });
 });
 
-describe("where the servers listen", () => {
+describe("where the servers listen", SPAWNS, () => {
   // A makefile read after the real one, whose target prints what the Makefile
   // exports — the environment `npm run dev` and `npm run start` start from.
   const probeDir = mkdtempSync(path.join(tmpdir(), "makefile-listen-"));

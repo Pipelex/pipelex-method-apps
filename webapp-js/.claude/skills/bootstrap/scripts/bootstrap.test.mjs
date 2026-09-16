@@ -48,6 +48,11 @@ const IS_TEMPLATE =
 // beside them, or the temp copies would print at Prettier's defaults.
 const SUPPORT_FILES = [".prettierrc", ".prettierignore"];
 
+// A test that runs the real CLI spawns Node, and the rewriting ones run
+// Prettier inside it too, which is slow on a busy machine: vitest's 5-second
+// default would fail the template's `make all` whenever the machine is loaded.
+const SPAWNS = { timeout: 60_000 };
+
 const tempRoots = [];
 afterAll(() => {
   for (const root of tempRoots) fs.rmSync(root, { recursive: true, force: true });
@@ -136,7 +141,7 @@ function baseArgs(root, overrides = {}) {
   return Object.entries(values).flat();
 }
 
-describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () => {
+describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", SPAWNS, () => {
   it("rewrites every target file with zero warnings", () => {
     const root = makeTempRepo();
     const res = runScript([
@@ -339,7 +344,7 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", () =
   });
 });
 
-describe("bootstrap.mjs input guards", () => {
+describe("bootstrap.mjs input guards", SPAWNS, () => {
   it("rejects a flag value that was swallowed by the next flag", () => {
     const res = runScript([
       "--root",
