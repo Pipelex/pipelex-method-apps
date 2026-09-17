@@ -28,7 +28,7 @@ Planned directories, not here yet: `cli-js/`, `cli-python/` and `webapp-python/`
 
 ## The root gate
 
-The root `Makefile` names the templates once, in `TEMPLATES`, and each of `install`, `check`, `lint`, `format`, `format-check`, `typecheck`, `test`, `agent-test`, `build`, `lock`, `clean`, `use-local` and `use-npm` runs the same target in every template, stopping at the first failure. `check` and `test` first run what belongs to the family:
+The root `Makefile` names the templates once, in `TEMPLATES`, and each of `install`, `check`, `lint`, `format`, `format-check`, `typecheck`, `test`, `agent-test`, `build`, `lock`, `clean`, `use-local`, `use-local-form`, `use-npm`, `use-npm-form` and `local-status` runs the same target in every template, stopping at the first failure. `check` and `test` first run what belongs to the family:
 
 - **`check-versions`** — `scripts/versions.mjs`. The family carries one version, in `VERSION`. Each template's manifest carries a version too, because a project keeps that manifest, and the check fails when any of them disagrees with `VERSION`. It reads a template's `package.json`, or the `[project]` table of its `pyproject.toml`.
 - **`check-workflows`** — `scripts/workflows.mjs --check`, described in the next section.
@@ -63,7 +63,7 @@ The root's own files pass through no hook; `make check-family` holds them to Pre
 
 ## The sibling packages
 
-In the Pipelex workspace, the `pipelex-sdk-js` and `mthds-form` checkouts sit beside this repository, two levels above a template's directory. A template's `make use-local` looks for them in its parent directory unless `SIBLINGS_DIR` says otherwise, and the root's `make use-local` passes `SIBLINGS_DIR=../..` to every template.
+In the Pipelex workspace, the `pipelex-sdk-js` and `mthds-form` checkouts sit beside this repository, two levels above a template's directory. A template's `make use-local` and `make use-local-form` look for them in its parent directory unless `SIBLINGS_DIR` says otherwise, and the root's targets of those names pass `SIBLINGS_DIR=../..` to every template. Switching back with `make use-npm` or `make use-npm-form` restores the version each template's lockfile pins and rewrites nothing, so a switch never moves a range: that is what the bump skills below are for.
 
 ## Moving the templates onto a newer form kernel
 

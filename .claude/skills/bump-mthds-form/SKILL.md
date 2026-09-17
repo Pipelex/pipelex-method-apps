@@ -13,16 +13,18 @@ description: Move pipelex-method-apps onto a newer published @pipelex/mthds-form
 
 Reading is free in the main checkout, so this step and the next two run wherever the session stands.
 
-The templates are the names in `TEMPLATES` in the root `Makefile` (`sed -n 's/^TEMPLATES := //p' Makefile`), and the ones this skill moves are those whose `package.json` lists `@pipelex/mthds-form` — a template in another language never will. For each of them, show the range and what is installed:
+The templates are the names in `TEMPLATES` in the root `Makefile` (`sed -n 's/^TEMPLATES := //p' Makefile`), and the ones this skill moves are those whose `package.json` lists `@pipelex/mthds-form` — a template in another language never will. For each of them, show the range, what is installed, and where it was installed from:
 
 ```bash
 node -p "require('./<template>/package.json').dependencies['@pipelex/mthds-form']"
 node -p "require('./<template>/node_modules/@pipelex/mthds-form/package.json').version"
 ```
 
+`make local-status` at the root covers the last of these for every template at once.
+
 Then, once, the latest published version: `npm view @pipelex/mthds-form version`.
 
-- **The installed version falls outside the range**: the template is running the tarball `make use-local` packed from the workspace's `mthds-form` checkout, which a bump must not be measured against. `make use-npm` at the root restores the published package in every template — and restores `@pipelex/sdk` too, so say that before running it.
+- **`make local-status` reports a package as `local`**: the template is running a tarball packed from a workspace checkout, which a bump must not be measured against — and the version cannot show it, since a local build carries the published version string. `make use-npm-form` at the root restores the kernel the lockfile pins in every template, and refuses while the SDK is local too, in which case `make use-npm` restores both. Neither rewrites a manifest, so the baseline they give is the one this bump moves from.
 - **The templates are on different versions**: they move to one version together here, and the lowest of them sets where the changelog reading in Step 3 starts.
 - **Every template is already on the latest**: say so and stop, unless the user named another version.
 

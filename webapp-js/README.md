@@ -95,7 +95,10 @@ Widen the host only on a network you trust, for a container or to open the app o
 | `make check`          | lint + format-check + typecheck + codegen-check                                                                                     |
 | `make all`            | check + test + build                                                                                                                |
 | `make use-local`      | Install the sibling `../pipelex-sdk-js` and `../mthds-form` checkouts into `node_modules` (`SIBLINGS_DIR=` names another directory) |
-| `make use-npm`        | Restore the published `@pipelex/sdk` and `@pipelex/mthds-form`                                                                      |
+| `make use-local-form` | Install the sibling `../mthds-form` checkout alone                                                                                  |
+| `make use-npm`        | Restore the `@pipelex/sdk` and `@pipelex/mthds-form` versions the lockfile pins                                                     |
+| `make use-npm-form`   | Restore the `@pipelex/mthds-form` version the lockfile pins                                                                         |
+| `make local-status`   | Say whether each `@pipelex` package comes from a sibling checkout or from npm                                                       |
 
 `make help` lists them all.
 

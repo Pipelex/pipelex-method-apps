@@ -19,8 +19,9 @@ Show the user:
 2. What's actually installed: `node -p "require('./node_modules/@pipelex/sdk/package.json').version"`
 3. The latest published version: `npm view @pipelex/sdk version`
 4. Working tree status (`git status --short`)
+5. Whether either package is a local tarball: `make local-status` (see this repo's `CLAUDE.md` § "Local package development"). The installed version cannot answer this, because a local build carries the version it will be published as.
 
-**If the installed version doesn't match the `package.json` range**, this repo is very likely on a local tarball install from `make use-local` (see the Makefile / this repo's `CLAUDE.md` § "Local package development"). A bump should target the _published_ package, not whatever's on disk from local SDK development — tell the user and offer to run `make use-npm` first to get back to a clean baseline. Note that `make use-npm` restores **both** `@pipelex/sdk` and `@pipelex/mthds-form` to their latest published versions and re-pins `package.json` for both — if the user wants only the SDK restored, offer `npm install @pipelex/sdk@latest` instead.
+**If `make local-status` reports `local`**, a bump should target the _published_ package, not whatever's on disk from local SDK development — tell the user and offer `make use-npm` first. It restores both `@pipelex/sdk` and `@pipelex/mthds-form` at the versions the lockfile pins and rewrites nothing, so the baseline it gives is the one this bump moves from.
 
 If the working tree is dirty, don't stop — this repo's checks (`make all`) don't require a clean tree — but note it, since the diff you produce at the end will sit alongside whatever else is already staged/unstaged. Ask before touching `package.json`/`package-lock.json` if either is already dirty, since your edit will land on top of unrelated in-flight changes to the same files.
 

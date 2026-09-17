@@ -335,15 +335,20 @@ Enforced via Husky + lint-staged on commit.
 | `make check`          | lint + format-check + typecheck + codegen-check                                                             |
 | `make all`            | check + test + build (does **not** include e2e, `codegen`, or `codegen-verify`)                             |
 | `make use-local`      | Pack and install siblings `../pipelex-sdk-js` + `../mthds-form`, or from `SIBLINGS_DIR=<dir>` (alias: `ul`) |
-| `make use-npm`        | Restore the latest npm-published `@pipelex/sdk` + `@pipelex/mthds-form` (alias: `un`)                       |
+| `make use-local-form` | Pack and install sibling `../mthds-form` alone, or from `SIBLINGS_DIR=<dir>`                                |
+| `make use-npm`        | Restore the `@pipelex/sdk` + `@pipelex/mthds-form` versions the lockfile pins (alias: `un`)                 |
+| `make use-npm-form`   | Restore the `@pipelex/mthds-form` version the lockfile pins                                                 |
+| `make local-status`   | Say whether each package comes from a sibling checkout or from npm                                          |
 
 ## Local package development (`use-local`)
 
-When working on this app alongside the SDK or the form kernel, use `make use-local` to install the siblings `../pipelex-sdk-js` and `../mthds-form` into `node_modules/@pipelex/sdk` and `node_modules/@pipelex/mthds-form` instead of the npm packages. The siblings are looked for in the parent directory, and `SIBLINGS_DIR=<dir>` names another one. The target builds each sibling, packs it with `npm pack`, then installs both resulting tarballs — in **one** `npm install` call, deliberately: a second `--no-save` install re-reconciles `node_modules` against the lockfile and can silently revert the first tarball to the registry version.
+When working on this app alongside the SDK or the form kernel, use `make use-local` to install the siblings `../pipelex-sdk-js` and `../mthds-form` into `node_modules/@pipelex/sdk` and `node_modules/@pipelex/mthds-form` instead of the npm packages, or `make use-local-form` to install the kernel alone. The siblings are looked for in the parent directory, and `SIBLINGS_DIR=<dir>` names another one. The target builds each sibling, packs it with `npm pack` into a temporary directory, then installs the tarballs — in **one** `npm install` call, deliberately: an `--no-save` install re-reconciles `node_modules` against the lockfile and silently puts any earlier tarball back on the registry version. For the same reason `make use-local-form` and `make use-npm-form` refuse to run while the SDK is local, and name `make use-local` or `make use-npm`, which switch both.
 
 We use a tarball install rather than a symlink (`ln -s`) because Next.js 16's Turbopack does not follow symlinked workspace packages — both `npm run dev` and `npm run build` fail with `Module not found: Can't resolve '@pipelex/sdk'` against a symlinked entry. **Re-run `make use-local` after every edit to either sibling** to pick up changes.
 
-`make use-npm` switches back, and it installs `@pipelex/sdk@latest` and `@pipelex/mthds-form@latest` rather than the plain names on purpose: the bare form re-resolves whatever range `package.json` already declares, so returning from a `use-local` session with a stale caret range would restore that range's newest match instead of the current release — a silent **downgrade**, since both packages are pre-1.0 and `^0.a.b` never crosses a minor. The `@latest` tag fetches the published release and re-pins the range to it.
+`make use-npm` switches back, and `make use-npm-form` switches the kernel alone. Both install the version `package-lock.json` pins, `--no-save`, so leaving local mode never rewrites `package.json` or the lockfile: moving a range is a reviewed change with a changelog to read, which is what the `/bump-mthds-form` and `/bump-sdk` skills are for. A newer release published while you worked locally therefore does not arrive by switching back.
+
+`make local-status` says which mode `node_modules` is in, package by package. The version cannot tell you, because a local build carries the version it will be published as, so the target reads where npm's hidden lockfile (`node_modules/.package-lock.json`) says each package was installed from.
 
 ## Workflow Rules
 
@@ -357,7 +362,7 @@ Other targets that matter:
 
 - **`make agent-test`** instead of `make test` when an AI agent runs the suite. It's silent on success; only failures hit the context.
 - **`make test-e2e`** before shipping changes that touch the SDK call path (`src/actions/`, `src/lib/pipelexClient.ts`, `src/lib/loadBundle.ts`, `src/lib/blockingRun.ts`, `src/lib/durableRun.ts`, `src/lib/wireOutput.ts`, `src/lib/errors.ts`, `src/lib/fileEncoding.ts`, `src/lib/resultUrls.ts`, `src/hooks/useRun.ts`, `src/generated/`, `methods/`). Unit tests mock the SDK; only e2e exercises the real API, the durable poll loop, and the rendered error UX. Not part of `make all`.
-- **`make use-local`** after editing the sibling `../pipelex-sdk-js` SDK or `../mthds-form` form kernel, before re-running tests or the dev server. The tarball install only refreshes when the target re-runs.
+- **`make use-local`** (or `make use-local-form` for the kernel alone) after editing the sibling `../pipelex-sdk-js` SDK or `../mthds-form` form kernel, before re-running tests or the dev server. The tarball install only refreshes when the target re-runs.
 
 ## Git Workflow
 
