@@ -27,14 +27,14 @@ If the working tree is dirty, don't stop — this repo's checks (`make all`) don
 
 ## Step 2 — Determine Target Version
 
-If current already equals latest, tell the user there's nothing to bump and stop (unless they explicitly want to re-pin a specific older/newer version).
+If current already equals latest, tell the user there's nothing to bump and stop (unless they name a newer version, published but not yet indexed).
 
 Otherwise use `AskUserQuestion` to confirm the target:
 
 - **Latest (`{npm view version}`)** — the default, recommended path.
 - **A specific version** — let the user type one (e.g. pinning to a version between current and latest, or ahead of latest if they published something not yet indexed).
 
-Store the result as `TARGET_VERSION` (no `v` prefix, e.g. `0.3.0`). Warn if it's a downgrade from what's installed and confirm that's intended.
+Store the result as `TARGET_VERSION` (no `v` prefix, e.g. `0.3.0`). If it is below what's installed, stop: a downgrade is not a bump. Undoing a release means reading its changelog backwards and reversing its migrations, which no step here does, so a rollback is the user's to plan by hand.
 
 ## Step 3 — Read What Changed
 
@@ -74,9 +74,8 @@ Not every impactful change is a mechanical rename — most of this kernel's chan
 
 ## Step 5 — Apply the Version Bump
 
-1. Edit the `"@pipelex/mthds-form"` line in `package.json` to `"^{TARGET_VERSION}"` — keep the existing caret-pin style, don't switch to an exact pin.
-2. Run `npm install` (not `--package-lock-only` — this needs the actual new package contents in `node_modules`: the `@source` directive and the CSS imports read the installed `dist/`, not the manifest).
-3. Confirm it landed: `node -p "require('./node_modules/@pipelex/mthds-form/package.json').version"` should now read `TARGET_VERSION`.
+1. Run `npm install @pipelex/mthds-form@{TARGET_VERSION}`. It rewrites the `"@pipelex/mthds-form"` line in `package.json` to `"^{TARGET_VERSION}"`, keeping the caret-pin style, and locks `TARGET_VERSION` itself. Editing the range by hand and running a bare `npm install` would lock the highest release that range admits instead, which is later than `TARGET_VERSION` whenever a patch release followed it — and Step 3 read the changelog only as far as `TARGET_VERSION`. Don't add `--package-lock-only`: this needs the actual new package contents in `node_modules` (the `@source` directive and the CSS imports read the installed `dist/`, not the manifest).
+2. Confirm it landed: `node -p "require('./node_modules/@pipelex/mthds-form/package.json').version"` should now read `TARGET_VERSION`.
 
 ## Step 6 — Run Checks
 

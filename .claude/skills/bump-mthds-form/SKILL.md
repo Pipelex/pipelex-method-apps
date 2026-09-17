@@ -30,7 +30,7 @@ Then, once, the latest published version: `npm view @pipelex/mthds-form version`
 
 ## Step 2 — Pick the target
 
-The target is the latest published version unless the invocation named another, so do not ask when there is no choice to make. A named version is fine whether it is ahead of what `npm view` reports (published but not yet indexed) or behind it; confirm a downgrade before going on. Call it `TARGET`, without a `v`.
+The target is the latest published version unless the invocation named another, so do not ask when there is no choice to make. A named version may be ahead of what `npm view` reports (published but not yet indexed) or behind it, as long as no template has already installed something newer. A version below what a template has installed is a downgrade, and a downgrade is not a bump: say so and stop. Undoing a release means reading its changelog backwards and reversing its migrations, which none of these steps does, so a rollback is planned by a person. Call it `TARGET`, without a `v`.
 
 ## Step 3 — Read what changed, against each template's seams
 
@@ -58,9 +58,8 @@ Everything from here on runs in the worktree.
 In each template this skill moves:
 
 1. **Apply the mechanical renames first.** For an entry that renames an identifier or an entry point (`` `old` `` → `` `new` ``), search the whole template for the old name, not only `src/`. Kernel names also appear in docs, tests, comments, and in code the scaffold emits, which lives as text under `scripts/lib/`. In `webapp-js`, `renderContracts` in `scripts/lib/shared.mts` writes the kernel import at the top of every generated `contracts.ts`, and the recorded contracts under `src/test/fixtures/contracts/` carry the same line. Leave the dated entries of any `CHANGELOG.md` alone. Afterwards, run `make format` in the template, because a rename inside a Markdown table changes its column padding.
-2. **Raise the range** to `"^<TARGET>"`, keeping the caret.
-3. **Run `npm install` inside the template**, not `make lock`: the stylesheet's `@source` line and the CSS imports read the installed `dist/`, so the gate needs the package itself and not only the lock. Confirm the result with the second `node -p` line from Step 1.
-4. **When the minor moved, run `npm ls mthds`** and confirm it still shows one deduplicated copy. Two copies mean the kernel and `@pipelex/sdk` now ask for `mthds` minors that do not overlap, which splits the protocol types they share. The cure is raising `@pipelex/sdk` in the same change, as the template's `bump-sdk` skill describes, never a cast.
+2. **Install the target exactly, inside the template**: `npm install @pipelex/mthds-form@<TARGET>`. It raises the range to `"^<TARGET>"`, keeping the caret, and locks `TARGET` itself. Raising the range by hand and running a bare `npm install` would lock the highest release the range admits instead, which is later than `TARGET` whenever a patch release followed it, and Step 3 read the changelog only as far as `TARGET`. Nor is `make lock` enough: the stylesheet's `@source` line and the CSS imports read the installed `dist/`, so the gate needs the package itself and not only the lock. Confirm that the second `node -p` line from Step 1 now reads `TARGET`.
+3. **When the minor moved, run `npm ls mthds`** and confirm it still shows one deduplicated copy. Two copies mean the kernel and `@pipelex/sdk` now ask for `mthds` minors that do not overlap, which splits the protocol types they share. The cure is raising `@pipelex/sdk` in the same change, as the template's `bump-sdk` skill describes, never a cast.
 
 A migration applied to a file the template shares with the gallery it was extracted from, `pipelex-starter-js`, is owed there too, as `webapp-js/docs/chrome-lineage.md` describes. Check whether the kernel's release already filed the gallery's own bump, and file a twin item against `pipelex-starter-js` when it did not.
 
