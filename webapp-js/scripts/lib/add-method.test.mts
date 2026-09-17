@@ -13,6 +13,7 @@
 // re-fetched. The one thing read from the real repo is `src/methods.ts`: the
 // anchor test exists precisely to fail the day a template edit moves an anchor.
 
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -48,6 +49,7 @@ import {
   scaffoldPaths,
   slugSource,
   TABS_ANCHOR,
+  WRITE_LOCK_FILENAME,
   writeAddMethod,
   type ScaffoldPlan,
 } from "./add-method.mts";
@@ -78,6 +80,16 @@ vi.mock("@pipelex/sdk", async (importOriginal) => {
 });
 
 const TEXT_STATS_REF = "github.com/Pipelex/methods/text_stats@v0.1.1";
+
+/** The error a promise rejects with, failing the test when it resolves instead. */
+async function refusalOf(pending: Promise<unknown>): Promise<Error> {
+  const outcome = await pending.then(
+    () => null,
+    (error: unknown) => error,
+  );
+  if (!(outcome instanceof Error)) throw new Error("expected a rejection");
+  return outcome;
+}
 
 // ── The selector ────────────────────────────────────────────────────────────
 
@@ -266,7 +278,27 @@ describe("readBundle", () => {
   it("refuses a symlink inside the bundle rather than follow or skip it", async () => {
     await put(outside, "cv/main.mthds");
     await symlink(path.join(outside, "cv", "main.mthds"), path.join(outside, "cv", "link.mthds"));
-    await expect(readBundle("cv", outside, app)).rejects.toThrow(AddMethodError);
+
+    const refusal = await refusalOf(readBundle("cv", outside, app));
+
+    expect(refusal).toBeInstanceOf(AddMethodError);
+    expect(refusal.message).toMatch(/a symlink at .*link\.mthds — a bundle is read only from/);
+    // The codegen scripts' wording names methods/, where this bundle is not.
+    expect(refusal.message).not.toContain("methods/");
+  });
+
+  it("refuses a bundle named through a symlink, whether it links a file or a directory", async () => {
+    await put(outside, "notes.txt", "not a bundle\n");
+    await put(outside, "cv/main.mthds");
+    await symlink(path.join(outside, "notes.txt"), path.join(outside, "x.mthds"));
+    await symlink(path.join(outside, "cv"), path.join(outside, "linked"));
+
+    for (const given of ["x.mthds", "linked", "linked/"]) {
+      const refusal = await refusalOf(readBundle(given, outside, app));
+      expect(refusal).toBeInstanceOf(AddMethodError);
+      expect(refusal.message).toContain(`refusing a symlink at "${given}"`);
+      expect(refusal.message).not.toContain("methods/");
+    }
   });
 });
 
@@ -1357,6 +1389,71 @@ describe("runAddMethod", () => {
     expect(await readFile(path.join(root, "src/generated/receipts/types.ts"), "utf-8")).not.toBe(
       "// stale\n",
     );
+  });
+
+  it("refuses to write while another run holds the lock, so its tree survives", async () => {
+    // A bundle in place with no tree yet: the case where a run that made the
+    // tree and then failed would remove it, after a second run had rewritten
+    // it and succeeded.
+    await mkdir(path.join(root, "methods/receipts"), { recursive: true });
+    for (const name of ["concepts.mthds", "main.mthds"]) {
+      await writeFile(
+        path.join(root, "methods/receipts", name),
+        await readFile(path.join(RECEIPTS_DIR, name), "utf-8"),
+        "utf-8",
+      );
+    }
+    const args = { method: "methods/receipts", dryRun: false };
+    const first = await planAddMethod(args, deps(receiptsClient()));
+    const second = await planAddMethod(args, deps(receiptsClient()));
+
+    // The first run pauses in the writer's check, its tree already on disk.
+    let reached!: () => void;
+    const paused = new Promise<void>((resolve) => (reached = resolve));
+    let resume!: () => void;
+    const gate = new Promise<void>((resolve) => (resume = resolve));
+    (runCodegenCheck as unknown as Mock).mockImplementationOnce(async () => {
+      reached();
+      await gate;
+      return { drifts: [], isCurrent: true };
+    });
+    const writing = writeAddMethod(first, deps(receiptsClient()));
+    await paused;
+    const during = await written();
+    expect(during).toContain(WRITE_LOCK_FILENAME);
+    expect(during).toContain("src/generated/receipts/types.ts");
+
+    await expect(writeAddMethod(second, deps(receiptsClient()))).rejects.toThrow(
+      `another \`make add-method\` (pid ${process.pid}) is writing in this app`,
+    );
+    expect(await written()).toEqual(during);
+
+    resume();
+    await writing;
+    const after = await written();
+    expect(after).toContain("src/generated/receipts/types.ts");
+    expect(after).not.toContain(WRITE_LOCK_FILENAME);
+  });
+
+  it("refuses a lock left by a run that is gone, naming it, until it is removed", async () => {
+    const plan = await planAddMethod(
+      { method: RECEIPTS_DIR, dryRun: false },
+      deps(receiptsClient()),
+    );
+    const gone = spawnSync(process.execPath, ["-e", ""]).pid;
+    await writeFile(path.join(root, WRITE_LOCK_FILENAME), `${gone}\n`, "utf-8");
+    const before = await written();
+
+    const refusal = await refusalOf(writeAddMethod(plan, deps(receiptsClient())));
+
+    expect(refusal.message).toContain(`held by pid ${gone}, which is no longer running`);
+    expect(refusal.message).toContain(`remove ${WRITE_LOCK_FILENAME}`);
+    expect(await written()).toEqual(before);
+
+    await rm(path.join(root, WRITE_LOCK_FILENAME));
+    await writeAddMethod(plan, deps(receiptsClient()));
+    expect(await written()).toContain("src/generated/receipt-review/types.ts");
+    expect(await written()).not.toContain(WRITE_LOCK_FILENAME);
   });
 
   it("scaffolds a directory whose name reads like an address when it exists", async () => {
