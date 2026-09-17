@@ -25,17 +25,17 @@ Regeneration is the dev action, the offline check is the CI action — the split
 ## Layout
 
 ```
-methods/
-  cv-screening/main.mthds            # source of truth — a bundle in this repo
-  text-stats/method.json             # source of truth — a selector naming a method elsewhere
+methods/                              # <method> and <other-method> are your own methods' names
+  <method>/main.mthds                 # source of truth — a bundle in this repo
+  <other-method>/method.json          # source of truth — a selector naming a method elsewhere
 src/generated/                        # committed, generated, never hand-edited
-  cv-screening/
+  <method>/
     types.ts                          # zod schemas + z.infer types — imports only `zod`
     binder.ts                         # parse<Name> / serialize<Name> over the schemas
     contracts.ts                      # PIPE_IO_CONTRACTS + INPUT_FORM + OUTPUT_FORM — the gate's contract, the forms' descriptor, the result's
     codegen.lock                      # pipelex trust-chain lock, written verbatim
     sources.json                      # app-owned staleness sidecar (see below)
-  text-stats/ …                       # same set per method
+  <other-method>/ …                   # same set per method
 scripts/
   codegen.mts                         # CLI entry — npm run codegen
   codegen-check.mts                   # CLI entry — npm run codegen:check

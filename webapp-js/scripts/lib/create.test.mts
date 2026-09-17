@@ -126,6 +126,25 @@ function planOf(overrides: {
 describe("deriveIdentity", () => {
   const NONE = { method: "x", dryRun: false };
 
+  it("keeps an acronym's capitals in a derived title, where the method spells them", () => {
+    // Word-by-word title case made the `cv_screening` domain "Cv Screening".
+    expect(
+      deriveIdentity(
+        planOf({ slug: "cv-screening", description: "Score a batch of CVs against a scorecard." }),
+        NONE,
+      ).title,
+    ).toBe("CV Screening");
+  });
+
+  it("leaves a title somebody chose exactly as they wrote it", () => {
+    expect(
+      deriveIdentity(planOf({ slug: "cv-screening", description: "A batch of CVs." }), {
+        ...NONE,
+        title: "cv screening",
+      }).title,
+    ).toBe("cv screening");
+  });
+
   it("names a bundle's app after its slug, and describes it with the domain's description", () => {
     expect(deriveIdentity(planOf({ description: "Read receipts." }), NONE)).toEqual({
       name: "receipt-review",

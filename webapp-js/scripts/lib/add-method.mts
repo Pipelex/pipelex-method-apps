@@ -60,7 +60,12 @@ import {
 } from "@pipelex/sdk";
 
 import { assertSelectorSupport, explainSelectorFailure } from "./api.mts";
-import { fetchGenerated, writeGenerated, type FetchedMethod } from "./generate.mts";
+import {
+  fetchGenerated,
+  methodVocabulary,
+  writeGenerated,
+  type FetchedMethod,
+} from "./generate.mts";
 import {
   assertSecureBaseUrl,
   hashSource,
@@ -447,6 +452,66 @@ export function camelCase(slug: string): string {
 export function humanize(slug: string): string {
   const words = slug.split("-").join(" ");
   return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * The words a method spells with a capital after their first letter — `CVs`,
+ * `PDF`, `PostgreSQL`, `REST`.
+ *
+ * That interior capital is what tells an acronym or a brand from an ordinary
+ * word that happens to open a sentence: taking every capitalized word would
+ * make "Build a hiring scorecard" turn a `build` slug into "Build", which says
+ * nothing about how the author spells anything.
+ */
+export function spelledWords(prose: string): Map<string, string> {
+  const spellings = new Map<string, string>();
+  const plurals = new Map<string, string>();
+  for (const word of prose.match(/[A-Za-z][A-Za-z0-9]*/g) ?? []) {
+    if (!/[A-Z]/.test(word.slice(1))) continue;
+    const lower = word.toLowerCase();
+    if (!spellings.has(lower)) spellings.set(lower, word);
+    // A method writing "CVs" spells "cv" too, and one writing "CV" spells
+    // "cvs" — a derived word is singular or plural by the slug's grammar, not
+    // by the prose's.
+    if (word.endsWith("s")) {
+      const singular = word.slice(0, -1);
+      if (!plurals.has(singular.toLowerCase())) plurals.set(singular.toLowerCase(), singular);
+    } else if (!plurals.has(`${lower}s`)) {
+      plurals.set(`${lower}s`, `${word}s`);
+    }
+  }
+  for (const [lower, word] of plurals) if (!spellings.has(lower)) spellings.set(lower, word);
+  return spellings;
+}
+
+/**
+ * A label inside a sentence — `Run text stats`, `Run CV screening`.
+ *
+ * Every word is lower-cased except one carrying an interior capital, which is
+ * an acronym or a brand and is spelled the way it is spelled wherever it sits.
+ * A flat `toLowerCase()` put "Run cv screening" on the button of a project
+ * whose method writes "CVs".
+ */
+export function inSentence(label: string): string {
+  return label.replace(/[A-Za-z][A-Za-z0-9]*/g, (word) =>
+    /[A-Z]/.test(word.slice(1)) ? word : word.toLowerCase(),
+  );
+}
+
+/**
+ * Give back `text` with every word the method spells its own way respelled —
+ * `Cv screening` → `CV screening`.
+ *
+ * The gesture asks nothing, by design, so a derived label or title is the only
+ * one a project gets unless its author passes `--label` or `--title`. Deriving
+ * it word by word from a kebab slug lower-cases an acronym the method itself
+ * capitalizes: a `cv_screening` domain became "Cv screening" while the method's
+ * own description said "score a batch of CVs".
+ */
+export function respellAcronyms(text: string, prose: string): string {
+  const spellings = spelledWords(prose);
+  if (spellings.size === 0) return text;
+  return text.replace(/[A-Za-z][A-Za-z0-9]*/g, (word) => spellings.get(word.toLowerCase()) ?? word);
 }
 
 /**
@@ -1425,19 +1490,30 @@ export function renderForm(plan: ScaffoldPlan): string {
     `          disabled={${busy} || !ready}`,
     '          className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"',
     "        >",
-    `          {running ? "Running…" : ${JSON.stringify(`Run ${names.label.toLowerCase()}`)}}`,
+    `          {running ? "Running…" : ${JSON.stringify(`Run ${inSentence(names.label)}`)}}`,
     "        </button>",
     "      </form>",
     "",
     "      {running && (",
-    "        <RunStatus status={state.status} elapsedMs={state.elapsedMs} health={state.health} />",
+    "        <RunStatus",
+    "          status={state.status}",
+    "          elapsedMs={state.elapsedMs}",
+    "          health={state.health}",
+    "          runId={state.runId}",
+    "        />",
     "      )}",
     ...(hasFiles
       ? [
           "      {fileError && <ErrorDisplay error={fileError} />}",
-          '      {!fileError && state.phase === "error" && <ErrorDisplay error={state.error} />}',
+          '      {!fileError && state.phase === "error" && (',
+          "        <ErrorDisplay error={state.error} runId={state.runId} />",
+          "      )}",
         ]
-      : ['      {state.phase === "error" && <ErrorDisplay error={state.error} />}']),
+      : [
+          '      {state.phase === "error" && (',
+          "        <ErrorDisplay error={state.error} runId={state.runId} />",
+          "      )}",
+        ]),
     '      {state.phase === "done" && (',
     "        <>",
     "          {/* The result, rendered from the method's own output contract — the",
@@ -1780,6 +1856,16 @@ export async function planAddMethod(
   }
 
   if (fetched === null) throw new ReportedFailure();
+
+  // An acronym the method spells keeps its capitals, and only a DERIVED label
+  // is touched: a label somebody passed, or a catalog name somebody chose, is
+  // already the spelling they wanted.
+  if (names.label === humanize(names.slug)) {
+    names = {
+      ...names,
+      label: respellAcronyms(names.label, methodVocabulary(fetched.contracts.prose)),
+    };
+  }
 
   pipe ??= choosePipe(
     fetched.contracts.pipeIoContracts,
