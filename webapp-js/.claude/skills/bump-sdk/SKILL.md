@@ -44,7 +44,7 @@ You need the SDK's `CHANGELOG.md` entries for every version strictly after the c
 
 Extract the entries between `## [v{CURRENT}]` (exclusive) and `## [v{TARGET_VERSION}]` (inclusive) and present them to the user, grouped by version, newest first.
 
-**Call out every bullet that starts with "Breaking —"** (this changelog's convention for breaking changes, per the workspace's writing-style rule: "breaking", not "pre-1.0 breaking"). These are the ones that can actually affect this repo's code. Everything else (CI changes, internal refactors, non-breaking additions) is FYI only — mention briefly, don't dwell.
+**Call out every bullet whose bold title ends in `(Breaking)`** (this changelog's only marker for a breaking change). These are the ones that can actually affect this repo's code. Everything else (CI changes, internal refactors, non-breaking additions) is FYI only — mention briefly, don't dwell.
 
 ## Step 4 — Apply What's Mechanical
 
@@ -82,7 +82,7 @@ This repo keeps an `## [Unreleased]` section at the top of `CHANGELOG.md` (see e
 - Bumped `@pipelex/sdk` to `{TARGET_VERSION}` (was `{OLD_VERSION}`).
 ```
 
-If Step 4 applied any migrations that are themselves user-visible for this repo (e.g. a renamed env var consumers need to update in their own `.env.local`), add a `Breaking:` bullet describing it in this repo's own terms — the same way the existing `PIPELEX_API_URL → PIPELEX_BASE_URL` entry in this changelog does. Don't just copy the SDK's changelog wording verbatim; restate it for someone reading _this_ repo's changelog who has never looked at the SDK's.
+If Step 4 applied any migrations that are themselves user-visible for this repo (e.g. a renamed env var consumers need to update in their own `.env.local`), add a bullet describing it in this repo's own terms, with `(Breaking)` at the end of its bold title. Don't just copy the SDK's changelog wording verbatim; restate it for someone reading _this_ repo's changelog who has never looked at the SDK's.
 
 ## Step 8 — Review & Commit
 

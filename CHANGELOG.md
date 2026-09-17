@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- **A created project's `bump-mthds-form` and `bump-sdk` skills recognise a breaking change**: both read the `(Breaking)` marker that the form kernel's and the SDK's changelogs put at the end of an entry's title, where they looked for a `Breaking —` prefix neither writes. `bump-mthds-form` also treats a renamed `InputForm`, `OutputForm` or `PipeIOContracts` as a change to the project's own `renderContracts`, which writes that import into every `contracts.ts`, instead of sending it to the engine.
 - **The dev server no longer prints uploaded files**: the web app template sets `logging.serverFunctions: false`, because `next dev` logs each Server Function call with its arguments and a file reaches its Server Action as a base64 `data:` URL — so every document dropped into a form was written to the log in full.
 - **A created project's docs no longer illustrate themselves with a method it never had**: `CLAUDE.md` names the example it walks through as one, and `docs/codegen.md`'s tree sketch uses placeholders.
 
