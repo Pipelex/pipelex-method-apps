@@ -1423,9 +1423,12 @@ describe("runAddMethod", () => {
     expect(during).toContain(WRITE_LOCK_FILENAME);
     expect(during).toContain("src/generated/receipts/types.ts");
 
-    await expect(writeAddMethod(second, deps(receiptsClient()))).rejects.toThrow(
+    const refusal = await refusalOf(writeAddMethod(second, deps(receiptsClient())));
+    expect(refusal.message).toContain(
       `another \`make add-method\` (pid ${process.pid}) is writing in this app`,
     );
+    // A live pid may be a reused one, so the refusal still names the file.
+    expect(refusal.message).toContain(`left ${WRITE_LOCK_FILENAME} behind`);
     expect(await written()).toEqual(during);
 
     resume();

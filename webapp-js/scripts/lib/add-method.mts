@@ -1938,10 +1938,13 @@ async function withWriteLock<T>(repoRoot: string, body: () => Promise<T>): Promi
           `other run is going on, remove ${WRITE_LOCK_FILENAME}.`,
       );
     }
+    // A live pid may be a reused one, so this refusal names the file too.
     if (isRunning(pid)) {
       throw new AddMethodError(
         `another \`make add-method\` (pid ${pid}) is writing in this app. Nothing was ` +
-          "written: run again once it has finished.",
+          `written: run again once it has finished. If pid ${pid} is not a ` +
+          `\`make add-method\` run, a run that was stopped left ${WRITE_LOCK_FILENAME} behind ` +
+          "and its pid has been reused: remove the file and run again.",
       );
     }
     throw new AddMethodError(
