@@ -8,6 +8,7 @@
 
 ### Changed
 
+- **The web app template runs on `@pipelex/mthds-form` 0.9.0**: a nested record in a result table is named by its first text field instead of printing its JSON, a value that wraps in a record's label-and-value rows aligns left while a one-line value still ends at the right edge, and a file a form holds as a `data:` URL shows its format and size rather than its base64. The kernel's `./generative` entry comes with it.
 - **A derived title or label keeps an acronym's capitals**: `make create` and `make add-method` respell a word the method itself spells with an interior capital, so a `cv_screening` method gives "CV Screening" and a Run button reading "Run CV screening" where both said "Cv". A `--title` or a `--label` given on the command line, and a catalog name, are left exactly as written.
 - **The web app template leads the run chrome**: `docs/chrome-lineage.md` says so, and says what a session changing a carried file owes the gallery it was extracted from. It described the opposite direction.
 
