@@ -1733,6 +1733,8 @@ export async function planAddMethod(
   let methodFiles: EmittedFile[];
   let fetched: FetchedMethod | null;
   let names: ScaffoldNames;
+  /** Whether the label came from `--label` or a catalog name, rather than the slug. */
+  let labelChosen = false;
   let paths: ScaffoldPaths;
   let methodSource: MethodSource;
   let scaffoldSource: ScaffoldSource;
@@ -1770,7 +1772,9 @@ export async function planAddMethod(
     }
 
     const slug = args.name ?? kebabCase(slugSource(selector, catalog?.name, nameFlag), nameFlag);
-    names = scaffoldNames(slug, args.label ?? catalog?.name);
+    const chosenLabel = args.label ?? catalog?.name;
+    labelChosen = (chosenLabel?.trim() ?? "") !== "";
+    names = scaffoldNames(slug, chosenLabel);
     paths = scaffoldPaths(names);
     await refuseCollisions(inRepo, paths, { inPlace: false, nameFlag });
 
@@ -1830,6 +1834,7 @@ export async function planAddMethod(
       args.pipe,
     );
     const slug = bundle.inPlace ?? args.name ?? kebabCase(pipe.domain, nameFlag);
+    labelChosen = (args.label?.trim() ?? "") !== "";
     names = scaffoldNames(slug, args.label);
     paths = scaffoldPaths(names);
     inPlace = bundle.inPlace !== null;
@@ -1859,8 +1864,11 @@ export async function planAddMethod(
 
   // An acronym the method spells keeps its capitals, and only a DERIVED label
   // is touched: a label somebody passed, or a catalog name somebody chose, is
-  // already the spelling they wanted.
-  if (names.label === humanize(names.slug)) {
+  // already the spelling they wanted. Which one it is, is RECORDED rather than
+  // read back off the value - `--label "Cv screening"` on a `cv-screening`
+  // method is a chosen label that equals the derived one, and respelling it
+  // would break the promise this reads.
+  if (!labelChosen) {
     names = {
       ...names,
       label: respellAcronyms(names.label, methodVocabulary(fetched.contracts.prose)),

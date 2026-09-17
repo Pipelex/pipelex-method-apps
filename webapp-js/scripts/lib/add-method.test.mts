@@ -350,6 +350,14 @@ describe("the name derivations", () => {
     expect(respellAcronyms("Pdfs", prose)).toBe("PDFs");
   });
 
+  it("respells a derived label only, and records which it was rather than comparing", () => {
+    // `--label "Cv screening"` on a `cv-screening` method is a CHOSEN label
+    // that happens to equal the derived one, so a value comparison would have
+    // respelled it and broken the promise that a chosen label is kept.
+    expect(scaffoldNames("cv-screening", "Cv screening").label).toBe("Cv screening");
+    expect(scaffoldNames("cv-screening").label).toBe(humanize("cv-screening"));
+  });
+
   it("takes only a word spelled with an INTERIOR capital, not one opening a sentence", () => {
     // Every sentence starts with a capital, so a rule reading those would
     // respell "Score" and say nothing about how the author spells anything.
@@ -1367,6 +1375,35 @@ describe("runAddMethod", () => {
     expect(await readFile(path.join(root, "src/methods.ts"), "utf-8")).toBe(registryBefore);
 
     expect(await runAddMethod([RECEIPTS_DIR], deps(receiptsClient()))).toBe(0);
+  });
+
+  it("respells a DERIVED label from the method's prose, and never a chosen one", async () => {
+    // The provenance is recorded rather than read back off the value: a
+    // `--label` that equals what the slug would derive is still a chosen one.
+    const spellsCvs = {
+      ...RECEIPT_REVIEW_VALIDATE,
+      bundle_blueprint: {
+        ...RECEIPT_REVIEW_VALIDATE.bundle_blueprint,
+        description: "Score a batch of CVs against a hiring scorecard.",
+      },
+    };
+    const client = () =>
+      fakeClient({
+        codegen: vi.fn().mockResolvedValue(RECEIPT_REVIEW_CODEGEN),
+        validateFiles: vi.fn().mockResolvedValue(spellsCvs),
+      });
+
+    const derived = await planAddMethod(
+      { method: RECEIPTS_DIR, name: "cv-screening", dryRun: true },
+      deps(client()),
+    );
+    expect(derived.names.label).toBe("CV screening");
+
+    const chosen = await planAddMethod(
+      { method: RECEIPTS_DIR, name: "cv-screening", label: "Cv screening", dryRun: true },
+      deps(client()),
+    );
+    expect(chosen.names.label).toBe("Cv screening");
   });
 
   it("leaves a method directory another run created after the plan, and its files", async () => {
