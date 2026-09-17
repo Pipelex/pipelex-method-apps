@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **`loadMethodBundles` refuses a name that starts with a digit**: the web app template's bundle loader holds a method directory name to the rule `make add-method` derives one by, kebab-case with a letter first, so a name such as `3d-model`, which the scaffold refuses, is refused by the loader too.
+
 ## [v0.2.0] - 2026-09-16
 
 ### Highlights
