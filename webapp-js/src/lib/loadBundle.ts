@@ -3,8 +3,8 @@ import path from "node:path";
 
 const METHODS_DIR = path.join(process.cwd(), "methods");
 
-/** A method directory name, exactly as `make add-method` derives one. */
-const METHOD_NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** A method directory name, exactly as `make add-method` derives one: kebab-case, a letter first. */
+const METHOD_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 /**
  * Read every `.mthds` file of one method directory, for a run's

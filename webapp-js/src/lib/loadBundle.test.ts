@@ -55,7 +55,7 @@ describe("loadMethodBundles", () => {
     });
   });
 
-  it.each(["../escape", "Upper", "a/b", ""])(
+  it.each(["../escape", "Upper", "a/b", "", "3d-model"])(
     "refuses a name that is not kebab-case: %j",
     async (name) => {
       await expect(loadMethodBundles(name, methodsDir)).rejects.toThrow(/not a method directory/);
