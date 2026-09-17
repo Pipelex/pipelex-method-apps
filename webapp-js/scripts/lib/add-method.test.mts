@@ -34,6 +34,9 @@ import {
   fileInputsOf,
   hasGatingInput,
   humanize,
+  inSentence,
+  respellAcronyms,
+  spelledWords,
   IMPORTS_ANCHOR,
   kebabCase,
   looksLikePath,
@@ -336,6 +339,44 @@ describe("the name derivations", () => {
       label: "Text stats",
     });
     expect(scaffoldNames("text-stats", "Word counts").label).toBe("Word counts");
+  });
+
+  it("keeps an acronym's capitals where the method spells them", () => {
+    // `cv_screening` derived "Cv screening" while the method's own description
+    // said "score a batch of CVs against it".
+    const prose = "Score a batch of CVs against a hiring scorecard, one PDF at a time.";
+    expect(respellAcronyms(humanize("cv-screening"), prose)).toBe("CV screening");
+    expect(respellAcronyms("Cvs", prose)).toBe("CVs");
+    expect(respellAcronyms("Pdfs", prose)).toBe("PDFs");
+  });
+
+  it("respells a derived label only, and records which it was rather than comparing", () => {
+    // `--label "Cv screening"` on a `cv-screening` method is a CHOSEN label
+    // that happens to equal the derived one, so a value comparison would have
+    // respelled it and broken the promise that a chosen label is kept.
+    expect(scaffoldNames("cv-screening", "Cv screening").label).toBe("Cv screening");
+    expect(scaffoldNames("cv-screening").label).toBe(humanize("cv-screening"));
+  });
+
+  it("takes only a word spelled with an INTERIOR capital, not one opening a sentence", () => {
+    // Every sentence starts with a capital, so a rule reading those would
+    // respell "Score" and say nothing about how the author spells anything.
+    expect(respellAcronyms(humanize("score-cvs"), "Score a batch of CVs.")).toBe("Score CVs");
+    expect(spelledWords("Score a batch of CVs.")).toEqual(
+      new Map([
+        ["cvs", "CVs"],
+        ["cv", "CV"],
+      ]),
+    );
+  });
+
+  it("lower-cases a label inside a sentence, but never an acronym", () => {
+    expect(inSentence("Text stats")).toBe("text stats");
+    expect(inSentence("CV screening")).toBe("CV screening");
+  });
+
+  it("leaves a label alone when the method spells nothing its own way", () => {
+    expect(respellAcronyms("Text stats", "Count the words in a text.")).toBe("Text stats");
   });
 
   it("takes the slug from the package, and the repo when the address names none", () => {
@@ -844,6 +885,21 @@ describe("renderForm", () => {
     for (const tag of ["<textarea", "<input", "<select"]) expect(source).not.toContain(tag);
   });
 
+  it("hands the run id to the status card and the error display", () => {
+    // A durable run's id is the only handle on it once the page is closed, and
+    // the scaffold writes every form, so the chrome gets it here or nowhere.
+    const source = renderForm(TEXT_STATS_PLAN);
+    expect(source).toContain("runId={state.runId}");
+    expect(source).toContain("<ErrorDisplay error={state.error} runId={state.runId} />");
+  });
+
+  it("names the method on its Run button, keeping an acronym's capitals", () => {
+    expect(renderForm(TEXT_STATS_PLAN)).toContain('"Run text stats"');
+    expect(
+      renderForm({ ...TEXT_STATS_PLAN, names: scaffoldNames("cv-screening", "CV screening") }),
+    ).toContain('"Run CV screening"');
+  });
+
   it("renders the result from the output contract, not from a hand-written view", () => {
     // The half the scaffold could not project before the output-form descriptor
     // existed: a result component is a design decision about a shape, and the
@@ -1319,6 +1375,35 @@ describe("runAddMethod", () => {
     expect(await readFile(path.join(root, "src/methods.ts"), "utf-8")).toBe(registryBefore);
 
     expect(await runAddMethod([RECEIPTS_DIR], deps(receiptsClient()))).toBe(0);
+  });
+
+  it("respells a DERIVED label from the method's prose, and never a chosen one", async () => {
+    // The provenance is recorded rather than read back off the value: a
+    // `--label` that equals what the slug would derive is still a chosen one.
+    const spellsCvs = {
+      ...RECEIPT_REVIEW_VALIDATE,
+      bundle_blueprint: {
+        ...RECEIPT_REVIEW_VALIDATE.bundle_blueprint,
+        description: "Score a batch of CVs against a hiring scorecard.",
+      },
+    };
+    const client = () =>
+      fakeClient({
+        codegen: vi.fn().mockResolvedValue(RECEIPT_REVIEW_CODEGEN),
+        validateFiles: vi.fn().mockResolvedValue(spellsCvs),
+      });
+
+    const derived = await planAddMethod(
+      { method: RECEIPTS_DIR, name: "cv-screening", dryRun: true },
+      deps(client()),
+    );
+    expect(derived.names.label).toBe("CV screening");
+
+    const chosen = await planAddMethod(
+      { method: RECEIPTS_DIR, name: "cv-screening", label: "Cv screening", dryRun: true },
+      deps(client()),
+    );
+    expect(chosen.names.label).toBe("Cv screening");
   });
 
   it("leaves a method directory another run created after the plan, and its files", async () => {

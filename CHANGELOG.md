@@ -2,7 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A durable run shows its id**: the web app template's status card prints the run id while a run is going and its error display prints it when one fails, each selectable in a click, and the dev server logs it once when the run starts. A run started from a bundle in the project has no catalog id, so the id is the only way to look it up afterwards — in the back office, through the API, or in the workshop.
+
+### Changed
+
+- **A derived title or label keeps an acronym's capitals**: `make create` and `make add-method` respell a word the method itself spells with an interior capital, so a `cv_screening` method gives "CV Screening" and a Run button reading "Run CV screening" where both said "Cv". A `--title` or a `--label` given on the command line, and a catalog name, are left exactly as written.
+- **The web app template leads the run chrome**: `docs/chrome-lineage.md` says so, and says what a session changing a carried file owes the gallery it was extracted from. It described the opposite direction.
+
 ### Fixed
+
+- **The dev server no longer prints uploaded files**: the web app template sets `logging.serverFunctions: false`, because `next dev` logs each Server Function call with its arguments and a file reaches its Server Action as a base64 `data:` URL — so every document dropped into a form was written to the log in full.
+- **A created project's docs no longer illustrate themselves with a method it never had**: `CLAUDE.md` names the example it walks through as one, and `docs/codegen.md`'s tree sketch uses placeholders.
 
 - **`loadMethodBundles` refuses a name that starts with a digit**: the web app template's bundle loader holds a method directory name to the rule `make add-method` derives one by, kebab-case with a letter first, so a name such as `3d-model`, which the scaffold refuses, is refused by the loader too.
 - **`loadMethodBundles` reads a bundle in codegen's order on Windows**: the loader sorts on each file's path inside the method directory written with `/`, as `npm run codegen` does, so a run sends `mthds_contents` in the order the generated types were projected from on every platform, where it used to put `steps2.mthds` before `steps/score.mthds` on Windows.

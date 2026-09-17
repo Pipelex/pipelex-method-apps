@@ -1,12 +1,16 @@
-# Chrome lineage: what this template took from the gallery
+# Chrome lineage: the template leads, and what it took from the gallery
 
 This template was extracted from [`pipelex-starter-js`](https://github.com/Pipelex/pipelex-starter-js), the gallery app that presents several demo methods as tabs. The gallery keeps its demos; this template keeps the parts every method needs — the run chrome and the codegen kit — and ships no method. This document records where the extraction started, what was carried unchanged, what was adapted and why, and what was left behind, so that a later fix in either repository can be carried to the other deliberately.
 
+## The direction: this template is the reference copy
+
+Decided on 2026-09-17, after weighing a published package and a one-way sync gesture against the cost of a new release train. **The run chrome stays copied by hand, and this template leads it.** A fix to the chrome lands here first and is carried to `pipelex-starter-js` as a twin task filed against the gallery; the reverse direction is a correction, not the norm. Nothing keeps the two in sync by itself, and no tool is coming: the question reopens the day a third app needs the same chrome.
+
+So a session changing anything under "Carried unchanged" below owes the gallery a twin — file it before the change lands, naming the files and what the fix was, because whoever ports it there will not have this context. A session changing only what is listed under "Adapted" owes nothing: those files have already diverged deliberately.
+
 ## The source
 
-The extraction was taken from the gallery at commit `3bf44f0fbd3d967b8e50d171454da2278593ee95`. A file listed below as carried unchanged is byte-identical to the gallery's copy at that commit. A file the template changed after the extraction is listed under "Adapted" and says what changed.
-
-The two repositories are not kept in sync by any tool. When the gallery's chrome changes, compare against this commit to see whether the template holds the same code, and port the change by hand.
+The extraction was taken from the gallery at commit `3bf44f0fbd3d967b8e50d171454da2278593ee95`, which is the history rather than the rule: a file listed below as carried unchanged was byte-identical to the gallery's copy at that commit, and a file the template changed after the extraction is listed under "Adapted" and says what changed. To see whether the gallery still holds the same code, compare against that commit and the changes since.
 
 ## Carried unchanged
 
