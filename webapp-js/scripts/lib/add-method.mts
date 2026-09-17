@@ -67,6 +67,7 @@ import {
   MANIFEST_FILENAME,
   NonUtf8FileError,
   readTextFile,
+  refuseSymlinkRoot,
   REPO_ROOT,
   selectorKind,
   describeSelector,
@@ -249,11 +250,13 @@ function isInside(root: string, candidate: string): boolean {
  * The refusal for a bundle path that is not a regular file or directory,
  * worded for a path anywhere: the codegen scripts' own wording names
  * `methods/` and `src/generated/`, which is wrong for a bundle outside both.
+ * It promises what `readBundle` checks and no more — the path named and
+ * everything under a bundle directory, not the directories above the path.
  */
 function notRegularRefusal(where: string, kind: string): string {
   return (
-    `refusing ${kind} at ${where} — a bundle is read only from regular files and ` +
-    "directories, and a link is never followed. Point at the files themselves."
+    `refusing ${kind} at ${where} — the path given, and everything under a bundle ` +
+    "directory, must be a regular file or a directory. Point at the files themselves."
   );
 }
 
@@ -1635,6 +1638,18 @@ export async function planAddMethod(
     );
   }
 
+  // The codegen scripts refuse a symlinked `methods/` or `src/generated/`, and
+  // the write half writes into both: refused here, before anything is fetched,
+  // rather than written through and refused by `make check` afterwards.
+  for (const root of ["methods", path.join("src", "generated")]) {
+    try {
+      await refuseSymlinkRoot(inRepo(root));
+    } catch (error) {
+      if (error instanceof SymlinkRefusedError) throw new AddMethodError(error.message);
+      throw error;
+    }
+  }
+
   const arg = parseMethodArg(args.method, (value) =>
     existsSync(path.resolve(deps.cwd ?? repoRoot, expandHome(value))),
   );
@@ -1902,7 +1917,8 @@ function isRunning(pid: number): boolean {
  * refused before it writes anything. The lock is removed only by the run that
  * made it. One left behind by a run that was killed is never broken on its own
  * — two runs breaking it at once would each believe they held it — so the
- * refusal says whether its owner is still running and names the file.
+ * refusal says whether its owner is still running and names the file. A lock
+ * with no pid in it yet, or already gone, is one being taken or released.
  */
 async function withWriteLock<T>(repoRoot: string, body: () => Promise<T>): Promise<T> {
   const lockPath = path.join(repoRoot, WRITE_LOCK_FILENAME);
@@ -1911,18 +1927,26 @@ async function withWriteLock<T>(repoRoot: string, body: () => Promise<T>): Promi
     await writeFile(lockPath, stamp, { encoding: "utf-8", flag: "wx" });
   } catch (error) {
     if ((error as NodeJS.ErrnoException | null)?.code !== "EEXIST") throw error;
+    // Empty or gone: the file is created before its stamp is written, and
+    // removed when its run ends, so another run is taking or releasing it.
     const held = await readFile(lockPath, "utf-8").catch(() => "");
     const pid = Number(held.split("\n")[0]);
-    const known = Number.isSafeInteger(pid) && pid > 0;
-    if (known && isRunning(pid)) {
+    if (!(Number.isSafeInteger(pid) && pid > 0)) {
+      throw new AddMethodError(
+        `another \`make add-method\` is taking or releasing ${WRITE_LOCK_FILENAME}. Nothing ` +
+          "was written: run again in a moment, and if it is refused the same way while no " +
+          `other run is going on, remove ${WRITE_LOCK_FILENAME}.`,
+      );
+    }
+    if (isRunning(pid)) {
       throw new AddMethodError(
         `another \`make add-method\` (pid ${pid}) is writing in this app. Nothing was ` +
           "written: run again once it has finished.",
       );
     }
     throw new AddMethodError(
-      `${WRITE_LOCK_FILENAME} is held${known ? ` by pid ${pid}, which is no longer running` : ""}, ` +
-        "so a run was stopped before it could remove it. Nothing was written: if no other " +
+      `${WRITE_LOCK_FILENAME} is held by pid ${pid}, which is no longer running, so a run ` +
+        "was stopped before it could remove it. Nothing was written: if no other " +
         `\`make add-method\` is running, remove ${WRITE_LOCK_FILENAME} and run again.`,
     );
   }

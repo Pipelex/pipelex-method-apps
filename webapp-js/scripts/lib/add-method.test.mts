@@ -282,7 +282,7 @@ describe("readBundle", () => {
     const refusal = await refusalOf(readBundle("cv", outside, app));
 
     expect(refusal).toBeInstanceOf(AddMethodError);
-    expect(refusal.message).toMatch(/a symlink at .*link\.mthds — a bundle is read only from/);
+    expect(refusal.message).toMatch(/a symlink at .*link\.mthds — the path given, and everything/);
     // The codegen scripts' wording names methods/, where this bundle is not.
     expect(refusal.message).not.toContain("methods/");
   });
@@ -1455,6 +1455,46 @@ describe("runAddMethod", () => {
     expect(await written()).toContain("src/generated/receipt-review/types.ts");
     expect(await written()).not.toContain(WRITE_LOCK_FILENAME);
   });
+
+  it("reads a lock holding no pid as one being taken or released, not as stale", async () => {
+    const plan = await planAddMethod(
+      { method: RECEIPTS_DIR, dryRun: false },
+      deps(receiptsClient()),
+    );
+    await writeFile(path.join(root, WRITE_LOCK_FILENAME), "", "utf-8");
+    const before = await written();
+
+    const refusal = await refusalOf(writeAddMethod(plan, deps(receiptsClient())));
+
+    expect(refusal.message).toContain(`is taking or releasing ${WRITE_LOCK_FILENAME}`);
+    expect(refusal.message).not.toContain("stopped");
+    expect(await written()).toEqual(before);
+  });
+
+  it.each(["methods", "src/generated"])(
+    "refuses a symlinked %s before fetching anything, writing nothing through it",
+    async (relative) => {
+      const elsewhere = await mkdtemp(path.join(tmpdir(), "add-method-elsewhere-"));
+      try {
+        await rm(path.join(root, relative), { recursive: true });
+        await symlink(elsewhere, path.join(root, relative));
+        const client = receiptsClient();
+        const errors: string[] = [];
+        vi.spyOn(console, "error").mockImplementation(
+          (line: unknown) => void errors.push(String(line)),
+        );
+
+        expect(await runAddMethod([RECEIPTS_DIR], deps(client))).toBe(1);
+
+        expect(errors.join("\n")).toContain("refusing a symlink at");
+        expect(client.validateFiles).not.toHaveBeenCalled();
+        expect(client.codegen).not.toHaveBeenCalled();
+        expect(await readdir(elsewhere)).toEqual([]);
+      } finally {
+        await rm(elsewhere, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("scaffolds a directory whose name reads like an address when it exists", async () => {
     const dotted = path.join(root, "bundles.v2/receipt-review");
