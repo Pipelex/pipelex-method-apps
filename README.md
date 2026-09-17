@@ -30,15 +30,17 @@ make dev                                               # http://127.0.0.1:4300
 
 Each template is self-contained: it has its own `Makefile`, its own `CLAUDE.md` and its own checks, and works from inside its directory exactly as it will in a project. The root carries what belongs to the family, and runs every template's gate at once:
 
-| Target              | Purpose                                                                                        |
-| ------------------- | ---------------------------------------------------------------------------------------------- |
-| `make install`      | Install every template's dependencies, and wire the pre-commit hook                            |
-| `make check`        | The family's own checks, then every template's `make check`                                    |
-| `make test`         | The tests of the root's scripts, then every template's tests                                   |
-| `make all`          | `check`, `test`, then every template's build                                                   |
-| `make workflows`    | Render the root twin of every template's CI workflows — needed after editing one               |
-| `make check-family` | Check the family's one version, the workflow twins, and the formatting of the root's own files |
-| `make use-local`    | Install the workspace's `pipelex-sdk-js` and `mthds-form` checkouts into every template        |
+| Target                | Purpose                                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| `make install`        | Install every template's dependencies, and wire the pre-commit hook                                |
+| `make check`          | The family's own checks, then every template's `make check`                                        |
+| `make test`           | The tests of the root's scripts, then every template's tests                                       |
+| `make all`            | `check`, `test`, then every template's build                                                       |
+| `make workflows`      | Render the root twin of every template's CI workflows — needed after editing one                   |
+| `make check-family`   | Check the family's one version, the workflow twins, and the formatting of the root's own files     |
+| `make use-local`      | Install the workspace's `pipelex-sdk-js` and `mthds-form` checkouts into every template            |
+| `make use-local-form` | Install the workspace's `mthds-form` checkout alone into every template                            |
+| `make local-status`   | Say, for every template, whether each `@pipelex` package comes from a sibling checkout or from npm |
 
 `make help` lists them all. [`docs/family.md`](docs/family.md) explains the layout: why the root twins each template's workflows, how the family carries one version, and what a new template needs to join.
 

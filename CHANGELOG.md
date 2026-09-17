@@ -4,16 +4,20 @@
 
 ### Added
 
+- **`make use-local-form`, `make use-npm-form` and `make local-status`**: the web app template switches the form kernel alone to the workspace's `mthds-form` checkout and back, and says package by package whether `node_modules` holds a local build or the published release, which the version cannot tell apart. A switch of the kernel alone refuses while the SDK is local, since its install would silently put the SDK back on npm; `make use-local` and `make use-npm` still switch both. The root runs each target in every template.
 - **A durable run shows its id**: the web app template's status card prints the run id while a run is going and its error display prints it when one fails, each selectable in a click, and the dev server logs it once when the run starts. A run started from a bundle in the project has no catalog id, so the id is the only way to look it up afterwards — in the back office, through the API, or in the workshop.
 
 ### Changed
 
+- **`make use-npm` restores the versions the lockfile pins (Breaking)**: switching the web app template back from local packages installs the `@pipelex/sdk` and `@pipelex/mthds-form` versions `package-lock.json` pins, and no longer installs `@latest` and rewrites `package.json` and the lockfile. A release published while you worked locally arrives through the `bump-sdk` and `bump-mthds-form` skills, which read its changelog first.
 - **The web app template runs on `@pipelex/mthds-form` 0.9.0**: a nested record in a result table is named by its first text field instead of printing its JSON, a value that wraps in a record's label-and-value rows aligns left while a one-line value still ends at the right edge, and a file a form holds as a `data:` URL shows its format and size rather than its base64. The kernel's `./generative` entry comes with it.
 - **A derived title or label keeps an acronym's capitals**: `make create` and `make add-method` respell a word the method itself spells with an interior capital, so a `cv_screening` method gives "CV Screening" and a Run button reading "Run CV screening" where both said "Cv". A `--title` or a `--label` given on the command line, and a catalog name, are left exactly as written.
 - **The web app template leads the run chrome**: `docs/chrome-lineage.md` says so, and says what a session changing a carried file owes the gallery it was extracted from. It described the opposite direction.
 
 ### Fixed
 
+- **A created project's `bump-mthds-form` and `bump-sdk` skills recognise a breaking change**: both read the `(Breaking)` marker that the form kernel's and the SDK's changelogs put at the end of an entry's title, where they looked for a `Breaking —` prefix neither writes. `bump-mthds-form` also treats a renamed `InputForm`, `OutputForm` or `PipeIOContracts` as a change to the project's own `renderContracts`, which writes that import into every `contracts.ts`, instead of sending it to the engine.
+- **A created project's `bump-mthds-form` and `bump-sdk` skills install the version whose changelog they read**: each installs the chosen release by name, so naming a version that a patch release has since followed locks and tests that version, where raising the range and running `npm install` locked the later patch. Each also stops at a downgrade, which none of their steps can undo, instead of asking to confirm it.
 - **The dev server no longer prints uploaded files**: the web app template sets `logging.serverFunctions: false`, because `next dev` logs each Server Function call with its arguments and a file reaches its Server Action as a base64 `data:` URL — so every document dropped into a form was written to the log in full.
 - **A created project's docs no longer illustrate themselves with a method it never had**: `CLAUDE.md` names the example it walks through as one, and `docs/codegen.md`'s tree sketch uses placeholders.
 

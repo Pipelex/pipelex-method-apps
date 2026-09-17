@@ -10,7 +10,7 @@
 // they do.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -92,37 +92,110 @@ describe("the Makefile's gesture arguments", SPAWNS, () => {
 });
 
 describe("the Makefile's sibling checkouts", SPAWNS, () => {
-  /** The directories `make use-local <vars>` would build, in order. */
-  function builtDirs(vars: readonly string[], env: Record<string, string> = {}): string[] {
-    const { status, stdout, stderr } = make(["-n", "use-local", ...vars], env);
+  /** The directories `make <target> <vars>` would build and pack, in order. */
+  function builtDirs(
+    target: "use-local" | "use-local-form",
+    vars: readonly string[],
+    env: Record<string, string> = {},
+  ): string[] {
+    const { status, stdout, stderr } = make(["-n", target, ...vars], env);
     expect(status, stderr).toBe(0);
-    return stdout
-      .split("\n")
-      .filter((printed) => printed.endsWith("&& npm run build"))
-      .map((printed) => printed.replace(/^cd /, "").replace(/ && npm run build$/, ""));
+    const packLine = stdout.split("\n").find((printed) => printed.startsWith("DEST="));
+    expect(packLine, stdout).toBeDefined();
+    const list = /for d in (.*?); do echo "Building and packing/.exec(packLine!);
+    expect(list, packLine).not.toBeNull();
+    // Each directory is one `shq`-quoted word: `'…'`, with `'\''` for a quote inside.
+    return list![1].match(/'[^']*'(?:\\''[^']*')*/g) ?? [];
   }
 
   it("looks in the parent directory by default", () => {
-    expect(builtDirs([])).toEqual(["'../pipelex-sdk-js'", "'../mthds-form'"]);
+    expect(builtDirs("use-local", [])).toEqual(["'../pipelex-sdk-js'", "'../mthds-form'"]);
+    expect(builtDirs("use-local-form", [])).toEqual(["'../mthds-form'"]);
   });
 
   it("looks where SIBLINGS_DIR says, quoted exactly as typed", () => {
-    expect(builtDirs(["SIBLINGS_DIR=../.."])).toEqual([
+    expect(builtDirs("use-local", ["SIBLINGS_DIR=../.."])).toEqual([
       "'../../pipelex-sdk-js'",
       "'../../mthds-form'",
     ]);
-    expect(builtDirs(["SIBLINGS_DIR=$(touch pwned) x"])).toEqual([
+    expect(builtDirs("use-local", ["SIBLINGS_DIR=$(touch pwned) x"])).toEqual([
       "'$(touch pwned) x/pipelex-sdk-js'",
       "'$(touch pwned) x/mthds-form'",
     ]);
+    expect(builtDirs("use-local-form", ["SIBLINGS_DIR=it's"])).toEqual(["'it'\\''s/mthds-form'"]);
   });
 
   it("ignores a SIBLINGS_DIR the shell exports, and a blank one", () => {
-    expect(builtDirs([], { SIBLINGS_DIR: "/elsewhere" })).toEqual([
+    expect(builtDirs("use-local", [], { SIBLINGS_DIR: "/elsewhere" })).toEqual([
       "'../pipelex-sdk-js'",
       "'../mthds-form'",
     ]);
-    expect(builtDirs(["SIBLINGS_DIR="])).toEqual(["'../pipelex-sdk-js'", "'../mthds-form'"]);
+    expect(builtDirs("use-local", ["SIBLINGS_DIR="])).toEqual([
+      "'../pipelex-sdk-js'",
+      "'../mthds-form'",
+    ]);
+  });
+});
+
+describe("the Makefile's local mode", SPAWNS, () => {
+  // The targets read npm's hidden lockfile from the directory make runs in, so
+  // each case runs the real Makefile (`-f`) inside a directory (`-C`) holding a
+  // hand-written one, and nothing in the repo's own node_modules is touched.
+  const dirs: string[] = [];
+  afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
+  /** A directory whose hidden lockfile resolves each package as `sources` says. */
+  function installed(sources: Record<string, "local" | "npm">): string {
+    const dir = mkdtempSync(path.join(tmpdir(), "makefile-local-"));
+    dirs.push(dir);
+    const packages = Object.fromEntries(
+      Object.entries(sources).map(([name, source]) => [
+        `node_modules/${name}`,
+        {
+          version: "0.1.0",
+          resolved:
+            source === "local"
+              ? "file:../../tmp/pack/package.tgz"
+              : `https://registry.npmjs.org/${name}/-/package-0.1.0.tgz`,
+        },
+      ]),
+    );
+    mkdirSync(path.join(dir, "node_modules"));
+    writeFileSync(
+      path.join(dir, "node_modules", ".package-lock.json"),
+      JSON.stringify({ packages }),
+    );
+    return dir;
+  }
+
+  function makeIn(dir: string, target: string) {
+    return make(["-C", dir, "-f", path.join(REPO_ROOT, "Makefile"), target]);
+  }
+
+  it("tells a sibling tarball from the registry, which the version cannot", () => {
+    const dir = installed({ "@pipelex/sdk": "npm", "@pipelex/mthds-form": "local" });
+    const { status, stdout, stderr } = makeIn(dir, "local-status");
+    expect(status, stderr).toBe(0);
+    expect(stdout).toContain("@pipelex/sdk npm 0.1.0");
+    expect(stdout).toContain("@pipelex/mthds-form local 0.1.0");
+  });
+
+  it("says a package is missing when nothing is installed", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "makefile-local-"));
+    dirs.push(dir);
+    const { status, stdout, stderr } = makeIn(dir, "local-status");
+    expect(status, stderr).toBe(0);
+    expect(stdout).toContain("@pipelex/sdk missing");
+    expect(stdout).toContain("@pipelex/mthds-form missing");
+  });
+
+  it("refuses to switch the kernel alone while the SDK is local, before building anything", () => {
+    const dir = installed({ "@pipelex/sdk": "local", "@pipelex/mthds-form": "npm" });
+    const { status, stdout } = makeIn(dir, "use-local-form");
+    expect(status).not.toBe(0);
+    expect(stdout).toContain("would silently put it back on npm");
+    expect(stdout).toContain("make use-local");
+    expect(stdout).not.toContain("Building and packing");
   });
 });
 

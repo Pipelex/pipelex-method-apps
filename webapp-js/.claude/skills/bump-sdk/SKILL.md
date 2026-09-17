@@ -19,21 +19,22 @@ Show the user:
 2. What's actually installed: `node -p "require('./node_modules/@pipelex/sdk/package.json').version"`
 3. The latest published version: `npm view @pipelex/sdk version`
 4. Working tree status (`git status --short`)
+5. Whether either package is a local tarball: `make local-status` (see this repo's `CLAUDE.md` § "Local package development"). The installed version cannot answer this, because a local build carries the version it will be published as.
 
-**If the installed version doesn't match the `package.json` range**, this repo is very likely on a local tarball install from `make use-local` (see the Makefile / this repo's `CLAUDE.md` § "Local package development"). A bump should target the _published_ package, not whatever's on disk from local SDK development — tell the user and offer to run `make use-npm` first to get back to a clean baseline. Note that `make use-npm` restores **both** `@pipelex/sdk` and `@pipelex/mthds-form` to their latest published versions and re-pins `package.json` for both — if the user wants only the SDK restored, offer `npm install @pipelex/sdk@latest` instead.
+**If `make local-status` reports `local`**, a bump should target the _published_ package, not whatever's on disk from local SDK development — tell the user and offer `make use-npm` first. It restores both `@pipelex/sdk` and `@pipelex/mthds-form` at the versions the lockfile pins and rewrites nothing, so the baseline it gives is the one this bump moves from.
 
 If the working tree is dirty, don't stop — this repo's checks (`make all`) don't require a clean tree — but note it, since the diff you produce at the end will sit alongside whatever else is already staged/unstaged. Ask before touching `package.json`/`package-lock.json` if either is already dirty, since your edit will land on top of unrelated in-flight changes to the same files.
 
 ## Step 2 — Determine Target Version
 
-If current already equals latest, tell the user there's nothing to bump and stop (unless they explicitly want to re-pin a specific older/newer version).
+If current already equals latest, tell the user there's nothing to bump and stop (unless they name a newer version, published but not yet indexed).
 
 Otherwise use `AskUserQuestion` to confirm the target:
 
 - **Latest (`{npm view version}`)** — the default, recommended path.
 - **A specific version** — let the user type one (e.g. pinning to a version between current and latest, or ahead of latest if they published something not yet indexed).
 
-Store the result as `TARGET_VERSION` (no `v` prefix, e.g. `0.2.0`). Warn if it's a downgrade from what's installed and confirm that's intended.
+Store the result as `TARGET_VERSION` (no `v` prefix, e.g. `0.2.0`). If it is below what's installed, stop: a downgrade is not a bump. Undoing a release means reading its changelog backwards and reversing its migrations, which no step here does, so a rollback is the user's to plan by hand.
 
 ## Step 3 — Read What Changed
 
@@ -44,7 +45,7 @@ You need the SDK's `CHANGELOG.md` entries for every version strictly after the c
 
 Extract the entries between `## [v{CURRENT}]` (exclusive) and `## [v{TARGET_VERSION}]` (inclusive) and present them to the user, grouped by version, newest first.
 
-**Call out every bullet that starts with "Breaking —"** (this changelog's convention for breaking changes, per the workspace's writing-style rule: "breaking", not "pre-1.0 breaking"). These are the ones that can actually affect this repo's code. Everything else (CI changes, internal refactors, non-breaking additions) is FYI only — mention briefly, don't dwell.
+**Call out every bullet whose bold title ends in `(Breaking)`** (this changelog's only marker for a breaking change). These are the ones that can actually affect this repo's code. Everything else (CI changes, internal refactors, non-breaking additions) is FYI only — mention briefly, don't dwell.
 
 ## Step 4 — Apply What's Mechanical
 
@@ -59,9 +60,8 @@ Not every breaking change is a mechanical rename — some are behavior changes (
 
 ## Step 5 — Apply the Version Bump
 
-1. Edit the `"@pipelex/sdk"` line in `package.json` to `"^{TARGET_VERSION}"` — keep the existing caret-pin style, don't switch to an exact pin.
-2. Run `npm install` (not `--package-lock-only` — unlike a version-only bump, this one needs the actual new package contents in `node_modules`, not just a manifest edit).
-3. Confirm it landed: `node -p "require('./node_modules/@pipelex/sdk/package.json').version"` should now read `TARGET_VERSION`.
+1. Run `npm install @pipelex/sdk@{TARGET_VERSION}`. It rewrites the `"@pipelex/sdk"` line in `package.json` to `"^{TARGET_VERSION}"`, keeping the caret-pin style, and locks `TARGET_VERSION` itself. Editing the range by hand and running a bare `npm install` would lock the highest release that range admits instead, which is later than `TARGET_VERSION` whenever a patch release followed it — and Step 3 read the changelog only as far as `TARGET_VERSION`. Don't add `--package-lock-only`: this needs the actual new package contents in `node_modules` (not just a manifest edit).
+2. Confirm it landed: `node -p "require('./node_modules/@pipelex/sdk/package.json').version"` should now read `TARGET_VERSION`.
 
 ## Step 6 — Run Checks
 
@@ -82,7 +82,7 @@ This repo keeps an `## [Unreleased]` section at the top of `CHANGELOG.md` (see e
 - Bumped `@pipelex/sdk` to `{TARGET_VERSION}` (was `{OLD_VERSION}`).
 ```
 
-If Step 4 applied any migrations that are themselves user-visible for this repo (e.g. a renamed env var consumers need to update in their own `.env.local`), add a `Breaking:` bullet describing it in this repo's own terms — the same way the existing `PIPELEX_API_URL → PIPELEX_BASE_URL` entry in this changelog does. Don't just copy the SDK's changelog wording verbatim; restate it for someone reading _this_ repo's changelog who has never looked at the SDK's.
+If Step 4 applied any migrations that are themselves user-visible for this repo (e.g. a renamed env var consumers need to update in their own `.env.local`), add a bullet describing it in this repo's own terms, with `(Breaking)` at the end of its bold title. Don't just copy the SDK's changelog wording verbatim; restate it for someone reading _this_ repo's changelog who has never looked at the SDK's.
 
 ## Step 8 — Review & Commit
 

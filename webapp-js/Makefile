@@ -1,4 +1,4 @@
-.PHONY: help run dev build start port-check lint format format-check typecheck codegen codegen-check codegen-verify add-method test test-watch test-e2e test-e2e-ui confirm-live-e2e agent-test check clean install lock all use-local use-npm ul un
+.PHONY: help run dev build start port-check lint format format-check typecheck codegen codegen-check codegen-verify add-method test test-watch test-e2e test-e2e-ui confirm-live-e2e agent-test check clean install lock all use-local use-local-form use-npm use-npm-form local-status ul un
 
 # ── Arguments ──────────────────────────────────────────────────────────────
 # The gestures take their values as make variables (`make add-method
@@ -224,8 +224,9 @@ clean: ## Remove build artifacts and caches
 # By default, `make install` fetches the published `@pipelex/sdk` and
 # `@pipelex/mthds-form` packages from npm. `make use-local` packs and installs
 # the sibling pipelex-sdk-js and mthds-form checkouts so you can develop them
-# and the app side-by-side. `make use-npm` restores the latest published
-# versions and re-pins package.json to them.
+# and the app side-by-side, and `make use-local-form` does the same for the form
+# kernel alone. `make use-npm` and `make use-npm-form` switch back, and
+# `make local-status` says which mode node_modules is in.
 #
 # The siblings are looked for in the parent directory. SIBLINGS_DIR=<dir> names
 # another one — `../..` for a checkout nested one level deeper than its
@@ -235,51 +236,91 @@ clean: ## Remove build artifacts and caches
 # 16's Turbopack does not follow symlinked workspace packages — `npm run dev`
 # and `npm run build` both fail with "Module not found" against a symlinked
 # node_modules entry. The tarball install gives us a real directory that
-# Turbopack resolves correctly. Re-run `make use-local` after every edit
-# to pick up changes.
+# Turbopack resolves correctly. Re-run the target after every sibling edit to
+# pick up changes.
 #
-# Both tarballs go through ONE `npm install` call on purpose: a second
-# `--no-save` install re-reconciles node_modules against the lockfile and can
-# silently revert the first tarball to the registry version.
+# Every switch installs `--no-save`, so package.json and package-lock.json are
+# never rewritten. Switching back restores the version the lockfile pins, not
+# `@latest`: moving a range is a reviewed change with a changelog to read, which
+# belongs to the `/bump-mthds-form` and `/bump-sdk` skills, never a side effect
+# of leaving local mode.
 #
-# The pack steps pass `--ignore-scripts` on purpose: each sibling's `prepare`
-# script re-runs its build during `npm pack`, and mthds-form's build (tsup)
-# prints to stdout — which would corrupt the captured tarball filename. We
-# build explicitly just before packing, so skipping `prepare` loses nothing.
+# ONE `npm install` per switch, on purpose: an `--no-save` install re-reconciles
+# node_modules against the lockfile and silently puts any EARLIER tarball back
+# on the registry version. That is why `use-local` installs both tarballs in one
+# call, and why the one-package targets refuse to run while the SDK is local —
+# they would put it back on npm without a word.
+#
+# The tarballs are packed straight into a fresh temporary directory
+# (`--pack-destination`), so nothing is written into the sibling checkouts, no
+# filename is captured from npm's output, and two worktrees switching at once
+# cannot overwrite each other's tarball. The pack steps pass `--ignore-scripts`
+# because each sibling's `prepare` re-runs its build during `npm pack`; we build
+# explicitly just before packing, so skipping `prepare` loses nothing.
+#
+# The kernel is packed alone, without the workspace's `mthds` checkout: it
+# resolves `mthds` from npm, the same copy `@pipelex/sdk` uses, and a local
+# `mthds` the SDK's range did not cover would split the protocol types the two
+# packages share. A kernel on a sibling branch that needs an unpublished `mthds`
+# fails loudly at the install, naming the version it could not find.
 SIBLINGS = $(or $(call given,SIBLINGS_DIR),..)
 SDK_DIR = $(call shq,$(SIBLINGS)/pipelex-sdk-js)
 FORM_DIR = $(call shq,$(SIBLINGS)/mthds-form)
 
-use-local: ## Pack and install the sibling pipelex-sdk-js and mthds-form checkouts into node_modules (from .., or SIBLINGS_DIR=<dir>)
-	@if [ ! -d $(SDK_DIR) ]; then \
-		echo ERROR: $(SDK_DIR) "not found — expected as a sibling checkout (SIBLINGS_DIR=<dir> says where the siblings are)."; exit 1; \
-	fi
-	@if [ ! -d $(FORM_DIR) ]; then \
-		echo ERROR: $(FORM_DIR) "not found — expected as a sibling checkout (SIBLINGS_DIR=<dir> says where the siblings are)."; exit 1; \
-	fi
-	@echo Building $(SDK_DIR) "so dist/ is up-to-date..."
-	cd $(SDK_DIR) && npm run build
-	@echo Packing $(SDK_DIR) "into a tarball..."
-	@cd $(SDK_DIR) && rm -f pipelex-sdk-*.tgz && TARBALL=$$(npm pack --silent --ignore-scripts) && mv $$TARBALL /tmp/pipelex-sdk-local.tgz
-	@echo Building $(FORM_DIR) "so dist/ is up-to-date..."
-	cd $(FORM_DIR) && npm run build
-	@echo Packing $(FORM_DIR) "into a tarball..."
-	@cd $(FORM_DIR) && rm -f pipelex-mthds-form-*.tgz && TARBALL=$$(npm pack --silent --ignore-scripts) && mv $$TARBALL /tmp/pipelex-mthds-form-local.tgz
-	rm -rf node_modules/@pipelex/sdk node_modules/@pipelex/mthds-form
-	npm install /tmp/pipelex-sdk-local.tgz /tmp/pipelex-mthds-form-local.tgz --no-save --silent
-	@rm -f /tmp/pipelex-sdk-local.tgz /tmp/pipelex-mthds-form-local.tgz
-	@echo Now using the local $(SDK_DIR) and $(FORM_DIR) "(tarball installs). Re-run after every edit. 'make use-npm' to switch back."
+# `$(call install_local,<sibling dirs>,<package names>)` builds and packs each
+# sibling into one temporary directory, then installs every tarball there in a
+# single `npm install`, and removes the directory whatever happens.
+define install_local
+	@for d in $(1); do \
+		if [ ! -d "$$d" ]; then echo "ERROR: $$d not found — expected as a sibling checkout (SIBLINGS_DIR=<dir> says where the siblings are)."; exit 1; fi; \
+	done
+	@DEST=$$(mktemp -d) && trap 'rm -rf "$$DEST"' EXIT && \
+	for d in $(1); do \
+		echo "Building and packing $$d..." && (cd "$$d" && npm run build && npm pack --silent --ignore-scripts --pack-destination "$$DEST" >/dev/null) || exit 1; \
+	done && \
+	for n in $(2); do rm -rf "node_modules/$$n"; done && \
+	npm install "$$DEST"/*.tgz --no-save --silent
+endef
 
-# The `@latest` tag is load-bearing. A bare `npm install @pipelex/sdk` re-resolves
-# the range already in package.json, so coming off `make use-local` with a stale
-# caret range restores that range's newest match rather than the current release —
-# silently DOWNGRADING, since both packages are pre-1.0 and `^0.a.b` will not
-# cross a minor. `@latest` fetches the published release and rewrites the range
-# to match it.
-use-npm: ## Restore the latest npm-published @pipelex/sdk and @pipelex/mthds-form packages
+# Where node_modules got each named package, read from npm's hidden lockfile:
+# `local` for a tarball packed from a sibling, `npm` for the registry, `missing`
+# when it is not installed. The version string cannot tell the first two apart,
+# since a local build carries the version it will be published as.
+SOURCE_OF = node -e 'let p = {}; try { p = require("./node_modules/.package-lock.json").packages; } catch {} for (const n of process.argv.slice(1)) { const e = p["node_modules/" + n]; const r = e?.resolved; console.log(n, !r ? "missing" : r.startsWith("file:") ? "local" : "npm", e?.version ?? ""); }'
+
+# The version package-lock.json pins for a package: what switching back restores.
+locked = $$(node -p 'require("./package-lock.json").packages["node_modules/$(1)"].version')
+
+# Refuse a one-package switch while the SDK is local, since its install would
+# silently put the SDK back on the registry version.
+define refuse_while_sdk_local
+	@if $(SOURCE_OF) @pipelex/sdk | grep -q ' local '; then \
+		echo "ERROR: @pipelex/sdk is installed from a local tarball, and installing the kernel alone would silently put it back on npm. Run 'make $(1)' instead, which switches both."; exit 1; \
+	fi
+endef
+
+use-local: ## Pack and install the sibling pipelex-sdk-js and mthds-form checkouts into node_modules (from .., or SIBLINGS_DIR=<dir>)
+	$(call install_local,$(SDK_DIR) $(FORM_DIR),@pipelex/sdk @pipelex/mthds-form)
+	@echo "Now using the local pipelex-sdk-js and mthds-form (tarball installs). Re-run after every edit. 'make use-npm' to switch back."
+
+use-local-form: ## Pack and install the sibling mthds-form checkout alone into node_modules (from .., or SIBLINGS_DIR=<dir>)
+	$(call refuse_while_sdk_local,use-local)
+	$(call install_local,$(FORM_DIR),@pipelex/mthds-form)
+	@echo "Now using the local mthds-form (tarball install). Re-run after every kernel edit. 'make use-npm-form' to switch back."
+
+use-npm: ## Restore the @pipelex/sdk and @pipelex/mthds-form versions package-lock.json pins
 	rm -rf node_modules/@pipelex/sdk node_modules/@pipelex/mthds-form
-	npm install @pipelex/sdk@latest @pipelex/mthds-form@latest
-	@echo "Restored npm-published @pipelex/sdk $$(node -p "require('./node_modules/@pipelex/sdk/package.json').version") and @pipelex/mthds-form $$(node -p "require('./node_modules/@pipelex/mthds-form/package.json').version"). Run 'make use-local' to switch back."
+	npm install @pipelex/sdk@$(call locked,@pipelex/sdk) @pipelex/mthds-form@$(call locked,@pipelex/mthds-form) --no-save --silent
+	@$(SOURCE_OF) @pipelex/sdk @pipelex/mthds-form
+
+use-npm-form: ## Restore the @pipelex/mthds-form version package-lock.json pins
+	$(call refuse_while_sdk_local,use-npm)
+	rm -rf node_modules/@pipelex/mthds-form
+	npm install @pipelex/mthds-form@$(call locked,@pipelex/mthds-form) --no-save --silent
+	@$(SOURCE_OF) @pipelex/mthds-form
+
+local-status: ## Say whether @pipelex/sdk and @pipelex/mthds-form come from a sibling checkout or from npm
+	@$(SOURCE_OF) @pipelex/sdk @pipelex/mthds-form
 
 ul: use-local ## Alias for use-local
 un: use-npm ## Alias for use-npm
