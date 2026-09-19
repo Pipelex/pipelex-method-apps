@@ -4,7 +4,7 @@ import {
   ArtifactFetchError,
   artifactFilename,
 } from "@pipelex/sdk";
-import { buildAssetHeaders } from "@/lib/assetHeaders";
+import { buildAssetHeaders, FRAME_AND_REFERRER_GUARD } from "@/lib/assetHeaders";
 import { getPipelexClient } from "@/lib/pipelexClient";
 import { allowPlainHttpArtifacts } from "@/lib/serverEnv";
 import { storageUriFromSegments } from "@/lib/storageAsset";
@@ -82,6 +82,26 @@ export async function HEAD(request: Request, context: RouteContext): Promise<Res
   return serveAsset(request, context, "HEAD");
 }
 
+/**
+ * This proxy's own bounds on one fetch, because the SDK's defaults are sized
+ * for `downloadArtifacts` writing to a disk — 1 GiB, and 120 s covering the
+ * connect, the headers AND the body read — and neither fits a browser proxy.
+ *
+ * The byte cap matters because `mayRead` ships open: until a deployment closes
+ * it, this is the only thing bounding what one unauthenticated request can
+ * make the server stream. 64 MiB is well above any file a method produces for
+ * a browser to paint or preview.
+ *
+ * The time budget matters because it is spent by the CLIENT's own pull: the
+ * response is streamed, so back-pressure from a slow reader counts against the
+ * same timer. At 120 s a legitimate large asset on a slow connection is
+ * aborted mid-stream, after the response has already advertised the store's
+ * full `content-length` — a failed transfer the browser reports as a length
+ * mismatch. 300 s for at most 64 MiB is a floor of roughly 1.8 Mbit/s.
+ */
+const MAX_ASSET_BYTES = 64 * 1024 * 1024;
+const ASSET_TIMEOUT_MS = 300_000;
+
 async function serveAsset(
   request: Request,
   context: RouteContext,
@@ -102,6 +122,8 @@ async function serveAsset(
     upstream = await getPipelexClient().fetchArtifact(uri, {
       signal: request.signal,
       allowHttp: allowPlainHttpArtifacts(),
+      maxBytes: MAX_ASSET_BYTES,
+      timeoutMs: ASSET_TIMEOUT_MS,
     });
   } catch (err) {
     return refusalFor(err);
@@ -173,7 +195,13 @@ function refusal(status: number, code: string, message: string): Response {
     { error: { code, message } },
     {
       status,
-      headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" },
+      headers: {
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        // The app's global framing and referrer rules leave this route out, so
+        // the route answers for every response it sends — this one included.
+        ...FRAME_AND_REFERRER_GUARD,
+      },
     },
   );
 }

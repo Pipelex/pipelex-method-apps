@@ -83,6 +83,17 @@ const STEP_TIMEOUT_MS = 240_000;
 const SERVER_TIMEOUT_MS = 180_000;
 const CREATE_TIMEOUT_MS = STEP_TIMEOUT_MS * 2 + SERVER_TIMEOUT_MS + 60_000;
 const RUN_TIMEOUT_MS = 300_000;
+const NAV_TIMEOUT_MS = 120_000;
+const DECODE_TIMEOUT_MS = 60_000;
+/**
+ * The test's own budget, built from the legs it actually contains rather than
+ * set equal to the run's: the navigation, the wait for the result, then the
+ * post-run legs — two screenshots, the re-fetch through the route, and the
+ * decode poll. A budget that only covered the run would expire while an inner
+ * timeout was still running, so a genuine failure would be reported as a bare
+ * `Test timeout of …ms exceeded` instead of the assertion that actually failed.
+ */
+const TILE_TEST_TIMEOUT_MS = NAV_TIMEOUT_MS + RUN_TIMEOUT_MS + DECODE_TIMEOUT_MS + 60_000;
 
 let app: string | undefined;
 let server: ChildProcess | undefined;
@@ -220,9 +231,9 @@ async function readCostTable(page: Page) {
 test("the image tile paints through the assets route, and the cost panel labels a partial cost as partial", async ({
   page,
 }, testInfo) => {
-  test.setTimeout(RUN_TIMEOUT_MS);
+  test.setTimeout(TILE_TEST_TIMEOUT_MS);
 
-  await page.goto(`${baseUrl}/`, { timeout: 120_000 });
+  await page.goto(`${baseUrl}/`, { timeout: NAV_TIMEOUT_MS });
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 
   // The form is the kernel's, so the control is reached by role and the
@@ -232,7 +243,7 @@ test("the image tile paints through the assets route, and the cost panel labels 
 
   // The result region is named after the method (`generate_image`, humanized).
   const result = page.getByRole("region", { name: "Generate image" });
-  await expect(result).toBeVisible({ timeout: RUN_TIMEOUT_MS - 30_000 });
+  await expect(result).toBeVisible({ timeout: RUN_TIMEOUT_MS });
 
   // A rendered file is always an `<img>`; the kernel's icons are `<svg>`.
   const img = result.locator("img").first();
@@ -282,12 +293,14 @@ test("the image tile paints through the assets route, and the cost panel labels 
   expect(headers["x-content-type-options"]).toBe("nosniff");
   expect(headers["content-disposition"]).toMatch(/^inline; filename="[A-Za-z0-9._-]+"$/);
   expect(headers["cache-control"]).toBe("private, max-age=300, must-revalidate");
-  // The sandbox rule is scoped to document-capable types, and a raster is not one.
-  expect(headers["content-security-policy"]).toBeUndefined();
+  // Every response from the route carries `frame-ancestors 'self'`; what is
+  // scoped to document-capable types is the `sandbox` directive, and a raster
+  // is not one.
+  expect(headers["content-security-policy"]).toBe("frame-ancestors 'self'");
   // And the browser actually decoded what the route streamed.
   await expect
     .poll(() => img.evaluate((el) => (el as HTMLImageElement).naturalWidth), {
-      timeout: 60_000,
+      timeout: DECODE_TIMEOUT_MS,
     })
     .toBeGreaterThan(0);
 

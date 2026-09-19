@@ -42,6 +42,11 @@ describe("GET /api/assets/[...path]", () => {
     // local compose stack exports a plain-http one, and this assertion would
     // fail on their machine and nowhere else.
     expect(options.allowHttp).toBe(false);
+    // The proxy's own bounds, not the SDK's disk-sized defaults: the byte cap
+    // is what bounds an unauthenticated request while `mayRead` ships open,
+    // and the time budget is spent by the client's own pull.
+    expect(options.maxBytes).toBe(64 * 1024 * 1024);
+    expect(options.timeoutMs).toBe(300_000);
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
@@ -84,6 +89,18 @@ describe("GET /api/assets/[...path]", () => {
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(fetchArtifact).not.toHaveBeenCalled();
+  });
+
+  it("carries the framing and referrer guard on a refusal, as on a served asset", async () => {
+    // `next.config.js` leaves this route out of the app's global framing and
+    // referrer rules so a PDF can be framed same-origin, which makes the route
+    // the only thing answering for its own responses. A refusal is one of them,
+    // so it must not be the single response in the app with no framing policy.
+    const response = await get(["org", "..", "secret.png"]);
+    expect(response.status).toBe(400);
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("x-frame-options")).toBe("SAMEORIGIN");
+    expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
   });
 
   it("answers 404 alike for a reference that is not the key's and one that names nothing", async () => {

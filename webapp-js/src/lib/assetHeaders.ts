@@ -67,6 +67,22 @@ const FRAME_ANCESTORS = "frame-ancestors 'self'";
 const DOCUMENT_SANDBOX_CSP = `default-src 'none'; sandbox; ${FRAME_ANCESTORS}`;
 
 /**
+ * The framing and referrer guard EVERY response from this route carries — a
+ * refusal as much as a served asset. `next.config.js` leaves `/api/assets/…`
+ * out of the app's global `X-Frame-Options`/`Referrer-Policy` rules so that a
+ * PDF can be framed same-origin, which makes this route the only thing that
+ * answers for its own responses. Shared rather than restated, so the two paths
+ * cannot drift: a refusal that skipped them would be the one response in the
+ * app carrying no framing policy at all.
+ */
+export const FRAME_AND_REFERRER_GUARD = {
+  "referrer-policy": "no-referrer",
+  // For a browser that does not understand `frame-ancestors`.
+  "x-frame-options": "SAMEORIGIN",
+  "content-security-policy": FRAME_ANCESTORS,
+} as const;
+
+/**
  * Upstream headers worth keeping: they describe the bytes handed on.
  *
  * `content-encoding` rides with `content-length` and is not optional: the SDK
@@ -128,9 +144,7 @@ export function buildAssetHeaders(
     "content-disposition": contentDisposition(contentType, filename),
     "cache-control": CACHE_CONTROL,
     "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    // For a browser that does not understand `frame-ancestors`.
-    "x-frame-options": "SAMEORIGIN",
+    ...FRAME_AND_REFERRER_GUARD,
     // The bytes are this origin's to embed and nobody else's to hotlink.
     "cross-origin-resource-policy": "same-origin",
   });

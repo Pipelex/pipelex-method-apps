@@ -81,8 +81,10 @@ src/
 e2e/
   home.spec.ts                # offline — the page renders its title and either the empty state or a form
   liveApi.ts                  # requireLiveApi() — the key guard every live spec calls
+  # template-only:begin
   resultTile.spec.ts          # LIVE — creates an app for an image method, runs it, pins the tile, the assets route's headers and the cost label
   fixtures/generate-image/    # the bundle that spec scaffolds
+  # template-only:end
 ```
 
 For a method named `<name>` (kebab-case; `<Pascal>` and `<camel>` are the same name in those cases), `make add-method` writes:
@@ -317,7 +319,12 @@ Enforced via Husky + lint-staged on commit.
 
 - **Location**: `e2e/*.spec.ts`
 - **`home.spec.ts` is offline** and runs with no key: the page renders its title from `src/site.ts`, and either the empty state or a form. It holds whether or not methods have been added.
-- **`resultTile.spec.ts` is live, and it is the whole-result proof.** It copies the template to a temporary directory, installs it (`npm ci --prefer-offline` — Turbopack refuses a symlinked `node_modules`), scaffolds `e2e/fixtures/generate-image/` with `add-method`, starts that app's own `next dev` on a free port, runs the method, and checks that the picture's `src` is `/api/assets/…` and decoded, that the route's header rules are on the response, and that the cost panel's footer follows the labelling rule the table shows. It saves a screenshot of the tile and of the cost panel under `test-results/`. It costs one image generation and needs a base URL that serves the form views.
+<!-- template-only:begin -->
+
+- **`resultTile.spec.ts` is live, and it is the whole-result proof.** It copies the template to a temporary directory, installs it (`npm ci --prefer-offline` — Turbopack refuses a symlinked `node_modules`), scaffolds `e2e/fixtures/generate-image/` with `add-method`, starts that app's own `next dev` on a free port, runs the method, and checks that the picture's `src` is `/api/assets/…` and decoded, that the route's header rules are on the response, and that the cost panel's footer follows the labelling rule the table shows. It saves a screenshot of the tile and of the cost panel under `test-results/`. It costs one image generation and needs a base URL that serves the form views. It proves the **template**, so the bootstrap removes it with its fixture: in a project that already registers a method the fixture's panel is a non-active tab, hidden from the accessibility tree, and the spec's first control never resolves.
+
+<!-- template-only:end -->
+
 - **A live-API spec is optional, and gated.** A spec that runs a method hits the live Pipelex API using `PIPELEX_API_KEY` from `.env.local` and costs an LLM call. Two guards make this safe: (1) it calls `requireLiveApi()` from `e2e/liveApi.ts`, which **auto-skips** when no key is set, and `playwright.config.ts` loads `.env.local` via `@next/env` so a configured key is visible to the runner; (2) `make test-e2e` **prompts for confirmation** before spending (the `confirm-live-e2e` target — skipped in CI / non-TTY shells, bypass with `CONFIRM=1`). A method addressed by `method_ref` additionally needs a base URL that advertises it.
 - **Excluded from `make all`** — run explicitly with `make test-e2e`
 - **First-time setup**: `npx playwright install chromium`
