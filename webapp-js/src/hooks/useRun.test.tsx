@@ -15,7 +15,7 @@ const USAGE = {
     },
   ],
   totalCostUsd: 0.001,
-  hasCost: true,
+  costPartial: false,
   state: "records" as const,
   assemblyError: null,
 };

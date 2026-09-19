@@ -49,10 +49,10 @@ describe("executeBlockingRun", () => {
       ok: true,
       output: { items: ["Ada"] },
       usage: {
+        state: "unavailable",
         calls: [],
         totalCostUsd: null,
-        hasCost: false,
-        state: "unavailable",
+        costPartial: false,
         assemblyError: null,
       },
     });

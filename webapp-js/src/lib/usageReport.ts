@@ -1,4 +1,9 @@
-import type { RunResults, TokensUsageRecord } from "@pipelex/sdk";
+import {
+  summarizeUsage,
+  type RunResults,
+  type TokensUsageRecord,
+  type UsageSummaryState,
+} from "@pipelex/sdk";
 
 /**
  * One inference call's usage, projected from a `TokensUsageRecord` for display.
@@ -27,24 +32,37 @@ export interface UsageCall {
 }
 
 /**
- * A run's usage, ready to render. `state` distinguishes the three nullness cases
- * of `RunResults.tokens_usages` that the render must tell apart:
+ * A run's usage, ready to render: the SDK's run-level summary, plus one row per
+ * inference call for the table.
+ *
+ * The totals and the three-way reading of `tokens_usages` are the SDK's
+ * `summarizeUsage`, not re-derived here — `docs/run-usage.md` in the SDK states
+ * the rules, and every consumer reads the same figures. `state` is its verdict,
+ * read first:
  * - `"records"`      — a non-empty list of inference calls to tabulate.
- * - `"no-inference"` — `[]`: assembly ran but no inference happened (all-cached / mock).
- * - `"unavailable"`  — `null`: assembly was off, broke, or the run predated the artifact.
- *                      `assemblyError` (non-null) is the ONLY signal that it *broke*,
- *                      as opposed to being off — all three leave `tokens_usages` null.
+ * - `"no_inference"` — `[]`: assembly ran but no inference happened, which costs
+ *                      `0`, not `null`.
+ * - `"unavailable"`  — `null`: assembly was off, broke, or the run predated the
+ *                      artifact. `assemblyError` (non-null) is the ONLY signal that
+ *                      it *broke*, as opposed to being off — all three leave
+ *                      `tokens_usages` null.
  */
 export interface UsageReport {
+  state: UsageSummaryState;
+  /** One row per inference call, in the order the calls completed. Empty outside `records`. */
   calls: UsageCall[];
   /**
-   * Sum of the non-null per-call costs; `null` when NO record carried a numeric cost.
-   * Null lets the UI say "cost not priced" rather than a misleading "$0.00".
+   * Sum of the priced calls' costs in USD. `0` for a run that did no inference.
+   * `null` under `records` when no call was priced — the UI then says "not priced"
+   * rather than a misleading "$0.00" — and under `unavailable`, where nothing is known.
    */
   totalCostUsd: number | null;
-  /** Whether any record carried a numeric cost (mirrors `totalCostUsd !== null`). */
-  hasCost: boolean;
-  state: "records" | "no-inference" | "unavailable";
+  /**
+   * True when priced and unrated calls are mixed, so `totalCostUsd` covers the
+   * priced calls only and is a lower bound. A sum that is partial must not be
+   * labelled a total. Never true outside `records`.
+   */
+  costPartial: boolean;
   /** The runner's usage-assembly error, set only when `tokens_usages` is null because it broke. */
   assemblyError: string | null;
 }
@@ -59,23 +77,14 @@ export interface UsageReport {
  * narrowers, which stay focused on the single main output.
  */
 export function buildUsageReport(results: RunResults): UsageReport {
-  const records = results.tokens_usages ?? null;
-  const assemblyError = results.usage_assembly_error ?? null;
-
-  if (records === null) {
-    return { calls: [], totalCostUsd: null, hasCost: false, state: "unavailable", assemblyError };
-  }
-  if (records.length === 0) {
-    return { calls: [], totalCostUsd: null, hasCost: false, state: "no-inference", assemblyError };
-  }
-
-  const calls = records.map(toUsageCall);
-  // Keep `0` — a priced-at-zero call is a real cost — and drop only the unpriced
-  // (`null`) ones. `null` total (no numeric cost anywhere) reads as "not priced".
-  const numericCosts = calls.map((c) => c.costUsd).filter((c): c is number => c !== null);
-  const hasCost = numericCosts.length > 0;
-  const totalCostUsd = hasCost ? numericCosts.reduce((sum, c) => sum + c, 0) : null;
-  return { calls, totalCostUsd, hasCost, state: "records", assemblyError };
+  const summary = summarizeUsage(results);
+  return {
+    state: summary.state,
+    calls: summary.state === "records" ? (results.tokens_usages ?? []).map(toUsageCall) : [],
+    totalCostUsd: summary.total_cost_usd,
+    costPartial: summary.cost_partial,
+    assemblyError: summary.assembly_error,
+  };
 }
 
 function toUsageCall(record: TokensUsageRecord): UsageCall {
@@ -84,7 +93,8 @@ function toUsageCall(record: TokensUsageRecord): UsageCall {
     modelType: record.model_type ?? null,
     pipeCode: record.pipe_code ?? null,
     tokensByCategory: record.nb_tokens_by_category ?? null,
-    // `?? null` (not `|| null`) so a legitimate `0` cost survives.
-    costUsd: record.cost ?? null,
+    // `typeof`, as the SDK's fold reads it: a legitimate `0` survives, and a
+    // malformed record's non-numeric cost counts as unrated rather than as a figure.
+    costUsd: typeof record.cost === "number" ? record.cost : null,
   };
 }

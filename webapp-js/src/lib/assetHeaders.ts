@@ -1,0 +1,120 @@
+/**
+ * Response headers for `/api/assets` — the same-origin stored-asset stream.
+ *
+ * Serving a run's files from this app's OWN origin is what keeps the presigned
+ * link off the page, and it is also the one thing that makes those files
+ * dangerous: an SVG or an HTML file fetched from this origin is same-origin, so
+ * if a browser ever renders it as a document its scripts run with this origin's
+ * cookies and storage. The SDK's `fetchArtifact` is header-neutral on purpose —
+ * it hands on the store's headers and says a proxy owns the response hygiene —
+ * so three rules live here, and they are why this is a module rather than a
+ * few inline `headers.set` calls:
+ *
+ *   1. `X-Content-Type-Options: nosniff` — the declared type is the only type.
+ *      Without it a `.png` full of markup can be sniffed into HTML.
+ *   2. Anything that can act as a DOCUMENT (SVG, HTML, XML) gets its own
+ *      `Content-Security-Policy: sandbox` response header, which drops it into
+ *      an opaque origin: it still renders inside `<img>`, but a direct
+ *      navigation to it can no longer touch this origin. Scoped to those types
+ *      on purpose — a blanket sandbox would also hit `application/pdf`, and a
+ *      sandboxed PDF breaks the browser's built-in viewer the kernel's document
+ *      preview relies on.
+ *   3. Only the types the kernel previews render inline; everything else is
+ *      `Content-Disposition: attachment`, so an unknown blob downloads instead
+ *      of being interpreted.
+ *
+ * Plus private caching: these bytes are authorized by the server's API key, so
+ * a shared cache must never hold them, and a browser may keep them briefly.
+ *
+ * Ported from the webapp's `asset-headers.ts`, minus the range and conditional
+ * request relay: `fetchArtifact` forwards no request header to the store, so
+ * this route always answers the whole object and advertises nothing else.
+ *
+ * Pure — takes headers, returns headers — so it is tested without a server.
+ */
+
+/** Types the kernel's file arms embed directly, beyond `image/*`. */
+const INLINE_TYPES = new Set(["application/pdf", "text/plain"]);
+
+/** Types a browser can execute script from when it treats the bytes as a document. */
+const DOCUMENT_CAPABLE_TYPES = new Set([
+  "image/svg+xml",
+  "text/html",
+  "application/xhtml+xml",
+  "text/xml",
+  "application/xml",
+]);
+
+const FALLBACK_CONTENT_TYPE = "application/octet-stream";
+
+/** Browser-only cache. Never `public` or `s-maxage`: the bytes are authorized per server, not per link. */
+const CACHE_CONTROL = "private, max-age=300, must-revalidate";
+
+/** The sandboxing policy a document-capable type is served under. */
+const DOCUMENT_SANDBOX_CSP = "default-src 'none'; sandbox";
+
+/** Upstream headers worth keeping: they describe the bytes handed on. */
+const PASSTHROUGH_HEADERS = ["content-length", "etag", "last-modified"] as const;
+
+/** Strip parameters (`; charset=…`) for type matching, keep them on the wire. */
+function baseType(contentType: string): string {
+  return contentType.split(";")[0]!.trim().toLowerCase();
+}
+
+export function isInlineRenderable(contentType: string): boolean {
+  const type = baseType(contentType);
+  return type.startsWith("image/") || INLINE_TYPES.has(type);
+}
+
+export function isDocumentCapable(contentType: string): boolean {
+  return DOCUMENT_CAPABLE_TYPES.has(baseType(contentType));
+}
+
+/**
+ * `Content-Disposition` for one asset. The filename is the SDK's
+ * `artifactFilename`, already reduced to `[A-Za-z0-9._-]`, so it can be quoted
+ * as it is; the guard is against a caller handing something else.
+ */
+export function contentDisposition(contentType: string, filename?: string): string {
+  const mode = isInlineRenderable(contentType) ? "inline" : "attachment";
+  if (!filename) return mode;
+  const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  return `${mode}; filename="${ascii}"`;
+}
+
+export interface AssetHeaderOptions {
+  /** The name offered to the browser on download. */
+  filename?: string;
+}
+
+/**
+ * Build the headers for one proxied asset response from the upstream store's
+ * response headers, as `fetchArtifact` hands them on.
+ */
+export function buildAssetHeaders(
+  upstream: Headers,
+  { filename }: AssetHeaderOptions = {},
+): Headers {
+  const contentType = upstream.get("content-type") || FALLBACK_CONTENT_TYPE;
+
+  const headers = new Headers({
+    "content-type": contentType,
+    "content-disposition": contentDisposition(contentType, filename),
+    "cache-control": CACHE_CONTROL,
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    // The bytes are this origin's to embed and nobody else's to hotlink.
+    "cross-origin-resource-policy": "same-origin",
+  });
+
+  if (isDocumentCapable(contentType)) {
+    headers.set("content-security-policy", DOCUMENT_SANDBOX_CSP);
+  }
+
+  for (const name of PASSTHROUGH_HEADERS) {
+    const value = upstream.get(name);
+    if (value) headers.set(name, value);
+  }
+
+  return headers;
+}

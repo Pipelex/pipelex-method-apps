@@ -26,14 +26,18 @@ function formatTokens(tokensByCategory: Record<string, number> | null): string {
 
 /**
  * Show a run's token usage and computed cost — the `RunResults.tokens_usages`
- * sibling, projected by `buildUsageReport`. Pure server component; renders one of
- * three shapes keyed off `usage.state`:
+ * sibling, projected by `buildUsageReport` over the SDK's `summarizeUsage`.
+ * Pure server component; renders one of three shapes keyed off `usage.state`:
  *
- * - `records`      → a compact per-call table + a total-cost row.
- * - `no-inference` → a subtle "nothing was billed" note.
- * - `unavailable`  → nothing at all, UNLESS assembly *broke* (`assemblyError` set),
- *                    in which case a muted "usage unavailable" note carries the
- *                    technical detail — demonstrating the broke-vs-off distinction.
+ * - `records`       → a compact per-call table + a cost row, which is labelled
+ *                     "Total" only when every call was priced. When priced and
+ *                     unrated calls are mixed (`costPartial`), the sum covers the
+ *                     priced calls alone and is a lower bound, so the row says so
+ *                     and a note explains it — a partial sum is never sold as a total.
+ * - `no_inference`  → a subtle "nothing was billed" note.
+ * - `unavailable`   → nothing at all, UNLESS assembly *broke* (`assemblyError` set),
+ *                     in which case a muted "usage unavailable" note carries the
+ *                     technical detail — demonstrating the broke-vs-off distinction.
  */
 export function CostReport({ usage }: CostReportProps) {
   if (usage.state === "unavailable") {
@@ -56,7 +60,7 @@ export function CostReport({ usage }: CostReportProps) {
     );
   }
 
-  if (usage.state === "no-inference") {
+  if (usage.state === "no_inference") {
     return (
       <section
         aria-label="Cost report"
@@ -66,6 +70,8 @@ export function CostReport({ usage }: CostReportProps) {
       </section>
     );
   }
+
+  const unpricedCalls = usage.calls.filter((call) => call.costUsd === null).length;
 
   return (
     <section
@@ -101,7 +107,7 @@ export function CostReport({ usage }: CostReportProps) {
           <tfoot>
             <tr className="font-medium text-slate-800">
               <td className="py-1 pr-3" colSpan={3}>
-                Total
+                {usage.costPartial ? "Priced calls only" : "Total"}
               </td>
               <td className="py-1 text-right tabular-nums">
                 {usage.totalCostUsd === null ? "Not priced" : formatUsd(usage.totalCostUsd)}
@@ -110,6 +116,12 @@ export function CostReport({ usage }: CostReportProps) {
           </tfoot>
         </table>
       </div>
+      {usage.costPartial && (
+        <p className="text-xs text-slate-500">
+          Partial cost: {unpricedCalls} of {usage.calls.length} calls had no rate table (e.g.
+          own-GPU, mock, or dry run), so the sum covers the priced calls only and is a lower bound.
+        </p>
+      )}
       {usage.totalCostUsd === null && (
         <p className="text-xs text-slate-500">
           No model in this run had a rate table (e.g. own-GPU, mock, or dry run), so cost is not
