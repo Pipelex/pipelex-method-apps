@@ -4,7 +4,7 @@ import { cp, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { requireLiveApi } from "./liveApi";
+import { hasLiveApiKey, requireLiveApi } from "./liveApi";
 
 /**
  * The result tile, end to end: a method app consuming a run's whole result.
@@ -22,7 +22,9 @@ import { requireLiveApi } from "./liveApi";
  *   returns the image as a `pipelex-storage://` reference beside a signed
  *   `public_url`; the kernel asks the host's resolver first, so with
  *   `ResultEnv` mounted the `<img src>` is `/api/assets/…` and the signed link
- *   never reaches the page. Only a real run produces a real reference.
+ *   is never what the browser fetches. Only a real run produces a real
+ *   reference. The receipt still carries `public_url`, so the spec reads the
+ *   rendered page rather than the payload.
  * - **The route's three header rules hold on the response the browser got**:
  *   `nosniff`, a controlled `Content-Disposition`, and the sandboxing CSP scoped
  *   to document-capable types — so absent on a raster. Private caching too.
@@ -72,7 +74,14 @@ const NOT_COPIED = new Set([
 ]);
 
 /** The three steps before the first request take a while on a cold cache, and the run itself is a live image generation. */
-const CREATE_TIMEOUT_MS = 300_000;
+/**
+ * The hook's own budget has to cover every step it wraps, or it fails the spec
+ * for a reason that has nothing to do with what the spec pins: two installs at
+ * `STEP_TIMEOUT_MS` each, then the wait for the dev server's first compile.
+ */
+const STEP_TIMEOUT_MS = 240_000;
+const SERVER_TIMEOUT_MS = 180_000;
+const CREATE_TIMEOUT_MS = STEP_TIMEOUT_MS * 2 + SERVER_TIMEOUT_MS + 60_000;
 const RUN_TIMEOUT_MS = 300_000;
 
 let app: string | undefined;
@@ -81,10 +90,23 @@ let baseUrl = "";
 
 /** Run one command in the created app, throwing with its output when it fails. */
 function run(command: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): void {
-  const result = spawnSync(command, args, { cwd, env, encoding: "utf-8", timeout: 240_000 });
+  const result = spawnSync(command, args, {
+    cwd,
+    env,
+    encoding: "utf-8",
+    timeout: STEP_TIMEOUT_MS,
+  });
   if (result.status !== 0) {
+    // A killed child leaves `status` null, so an exit code alone would report
+    // a timeout as "exit null" and send the reader looking for the wrong thing.
+    const why =
+      result.error !== undefined
+        ? result.error.message
+        : result.signal !== null
+          ? `killed by ${result.signal} (the step's ${STEP_TIMEOUT_MS}ms budget)`
+          : `exit ${result.status}`;
     throw new Error(
-      `${command} ${args.join(" ")} failed (exit ${result.status})\n${result.stdout}\n${result.stderr}`,
+      `${command} ${args.join(" ")} failed (${why})\n${result.stdout}\n${result.stderr}`,
     );
   }
 }
@@ -144,6 +166,10 @@ async function stopServer(child: ChildProcess): Promise<void> {
 }
 
 test.beforeAll(async () => {
+  // The file-scope skip already keeps this hook from running without a key.
+  // Standing on its own as well costs nothing and makes the expensive part
+  // unreachable by accident, whatever a future edit does to the guard.
+  if (!hasLiveApiKey()) return;
   test.setTimeout(CREATE_TIMEOUT_MS);
 
   const env: NodeJS.ProcessEnv = { ...process.env };
@@ -174,7 +200,7 @@ test.beforeAll(async () => {
   });
   server.stdout?.on("data", (chunk: Buffer) => process.stdout.write(`[app] ${chunk}`));
   server.stderr?.on("data", (chunk: Buffer) => process.stderr.write(`[app] ${chunk}`));
-  await waitForServer(`${baseUrl}/`, server, 180_000);
+  await waitForServer(`${baseUrl}/`, server, SERVER_TIMEOUT_MS);
 });
 
 test.afterAll(async () => {

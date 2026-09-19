@@ -7,7 +7,7 @@ import {
 } from "./assetHeaders";
 
 describe("buildAssetHeaders", () => {
-  it("serves an image inline, nosniffed, privately cached, and without a sandbox", () => {
+  it("serves an image inline, nosniffed, privately cached, and framed only by this origin", () => {
     const headers = buildAssetHeaders(
       new Headers({ "content-type": "image/png", "content-length": "1234", etag: '"abc"' }),
       { filename: "illustration.png" },
@@ -18,7 +18,11 @@ describe("buildAssetHeaders", () => {
     expect(headers.get("content-disposition")).toBe('inline; filename="illustration.png"');
     expect(headers.get("cache-control")).toBe("private, max-age=300, must-revalidate");
     // Rule 2 is scoped to document-capable types: a raster is not one.
-    expect(headers.get("content-security-policy")).toBeNull();
+    // Framing is allowed, same-origin only: the document preview's iframe now
+    // points at this origin, so a policy that blocked framing outright would
+    // break the viewer the route exists to feed.
+    expect(headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
+    expect(headers.get("x-frame-options")).toBe("SAMEORIGIN");
     expect(headers.get("referrer-policy")).toBe("no-referrer");
     expect(headers.get("cross-origin-resource-policy")).toBe("same-origin");
     // What describes the bytes handed on is kept.
@@ -29,7 +33,9 @@ describe("buildAssetHeaders", () => {
   it("sandboxes a document-capable type so it cannot act on this origin", () => {
     for (const type of ["image/svg+xml", "text/html; charset=utf-8", "application/xml"]) {
       const headers = buildAssetHeaders(new Headers({ "content-type": type }));
-      expect(headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+      expect(headers.get("content-security-policy")).toBe(
+        "default-src 'none'; sandbox; frame-ancestors 'self'",
+      );
       expect(headers.get("x-content-type-options")).toBe("nosniff");
     }
   });
@@ -39,7 +45,7 @@ describe("buildAssetHeaders", () => {
       filename: "report.pdf",
     });
     expect(headers.get("content-disposition")).toBe('inline; filename="report.pdf"');
-    expect(headers.get("content-security-policy")).toBeNull();
+    expect(headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
   });
 
   it("makes an unknown type a download rather than something to interpret", () => {

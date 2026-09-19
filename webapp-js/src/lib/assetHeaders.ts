@@ -28,7 +28,11 @@
  *
  * Ported from the webapp's `asset-headers.ts`, minus the range and conditional
  * request relay: `fetchArtifact` forwards no request header to the store, so
- * this route always answers the whole object and advertises nothing else.
+ * this route always answers the whole object and advertises nothing else. The
+ * store's validators are still handed on — they describe the bytes — but a
+ * browser revalidating after `max-age` gets a fresh `200` rather than a `304`,
+ * because the conditional header never reaches the store. Relaying it is a
+ * change the SDK's fetch seam has to make first.
  *
  * Pure — takes headers, returns headers — so it is tested without a server.
  */
@@ -50,11 +54,33 @@ const FALLBACK_CONTENT_TYPE = "application/octet-stream";
 /** Browser-only cache. Never `public` or `s-maxage`: the bytes are authorized per server, not per link. */
 const CACHE_CONTROL = "private, max-age=300, must-revalidate";
 
-/** The sandboxing policy a document-capable type is served under. */
-const DOCUMENT_SANDBOX_CSP = "default-src 'none'; sandbox";
+/**
+ * Framing is same-origin only, and it must be ALLOWED: the kernel's document
+ * preview renders a PDF in an `<iframe>`, and that iframe's `src` is now a path
+ * on this origin rather than the store's cross-origin link. `frame-ancestors`
+ * supersedes `X-Frame-Options` where both are understood, and `next.config.js`
+ * deliberately leaves this route out of its global `DENY` for the same reason.
+ */
+const FRAME_ANCESTORS = "frame-ancestors 'self'";
 
-/** Upstream headers worth keeping: they describe the bytes handed on. */
-const PASSTHROUGH_HEADERS = ["content-length", "etag", "last-modified"] as const;
+/** The sandboxing policy a document-capable type is served under. */
+const DOCUMENT_SANDBOX_CSP = `default-src 'none'; sandbox; ${FRAME_ANCESTORS}`;
+
+/**
+ * Upstream headers worth keeping: they describe the bytes handed on.
+ *
+ * `content-encoding` rides with `content-length` and is not optional: the SDK
+ * strips both when `fetch` decoded the body, and keeps both when it did not,
+ * so a coding left on the response means the bytes really are still encoded.
+ * Copying the length without the coding would label compressed bytes as plain
+ * and hand the browser a corrupt file.
+ */
+const PASSTHROUGH_HEADERS = [
+  "content-length",
+  "content-encoding",
+  "etag",
+  "last-modified",
+] as const;
 
 /** Strip parameters (`; charset=…`) for type matching, keep them on the wire. */
 function baseType(contentType: string): string {
@@ -103,13 +129,16 @@ export function buildAssetHeaders(
     "cache-control": CACHE_CONTROL,
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
+    // For a browser that does not understand `frame-ancestors`.
+    "x-frame-options": "SAMEORIGIN",
     // The bytes are this origin's to embed and nobody else's to hotlink.
     "cross-origin-resource-policy": "same-origin",
   });
 
-  if (isDocumentCapable(contentType)) {
-    headers.set("content-security-policy", DOCUMENT_SANDBOX_CSP);
-  }
+  headers.set(
+    "content-security-policy",
+    isDocumentCapable(contentType) ? DOCUMENT_SANDBOX_CSP : FRAME_ANCESTORS,
+  );
 
   for (const name of PASSTHROUGH_HEADERS) {
     const value = upstream.get(name);

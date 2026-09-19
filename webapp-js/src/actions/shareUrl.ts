@@ -1,7 +1,7 @@
 "use server";
 
 import { getPipelexClient } from "@/lib/pipelexClient";
-import { isStorageUri } from "@/lib/storageAsset";
+import { isShareableStorageUri } from "@/lib/storageAsset";
 
 /**
  * Mint a URL for a stored asset that works OUTSIDE this app — pasted into
@@ -20,9 +20,15 @@ import { isStorageUri } from "@/lib/storageAsset";
  * is not a storage reference, and any failure to mint, answers `undefined`,
  * which is the kernel's contract for "fall back to the display URL" — a thrown
  * error would reach the copy control as a rejected promise it does not catch.
+ *
+ * **A Server Action is a public endpoint**, and this one mints a credential
+ * that works outside the app. It is open in this template for the reason the
+ * assets route is — see `mayRead` in `src/app/api/assets/[...path]/route.ts` —
+ * and a deployment serving more than one person has to answer the same
+ * question here before minting anything.
  */
 export async function resolveShareUrl(uri: string): Promise<string | undefined> {
-  if (!isStorageUri(uri)) return undefined;
+  if (!isShareableStorageUri(uri)) return undefined;
   try {
     const { url } = await getPipelexClient().resolveStorageUrl({ uri });
     return typeof url === "string" && url !== "" ? url : undefined;

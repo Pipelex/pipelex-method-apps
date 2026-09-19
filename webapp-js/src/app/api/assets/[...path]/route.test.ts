@@ -26,6 +26,7 @@ function get(segments: string[]): Promise<Response> {
 
 describe("GET /api/assets/[...path]", () => {
   it("rebuilds the reference, fetches it through the SDK, and streams the bytes under the asset headers", async () => {
+    vi.stubEnv("PIPELEX_BASE_URL", "https://api.pipelex.com");
     fetchArtifact.mockResolvedValueOnce(
       upstream(PNG_BYTES, { "content-type": "image/png", "content-length": "8" }),
     );
@@ -36,7 +37,10 @@ describe("GET /api/assets/[...path]", () => {
     const [uri, options] = fetchArtifact.mock.calls[0]!;
     expect(uri).toBe("pipelex-storage://org_1/runs/01J/illustration.png");
     expect(options.signal).toBeInstanceOf(AbortSignal);
-    // Against the hosted API, a plain-http store link stays refused.
+    // Against the hosted API, a plain-http store link stays refused. The base
+    // URL is stubbed rather than inherited: a developer working against the
+    // local compose stack exports a plain-http one, and this assertion would
+    // fail on their machine and nowhere else.
     expect(options.allowHttp).toBe(false);
 
     expect(response.status).toBe(200);
@@ -44,7 +48,7 @@ describe("GET /api/assets/[...path]", () => {
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-disposition")).toBe('inline; filename="illustration.png"');
     expect(response.headers.get("cache-control")).toBe("private, max-age=300, must-revalidate");
-    expect(response.headers.get("content-security-policy")).toBeNull();
+    expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'self'");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG_BYTES);
   });
 
@@ -60,7 +64,9 @@ describe("GET /api/assets/[...path]", () => {
       upstream(new TextEncoder().encode("<svg/>"), { "content-type": "image/svg+xml" }),
     );
     const response = await get(["org", "diagram.svg"]);
-    expect(response.headers.get("content-security-policy")).toBe("default-src 'none'; sandbox");
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; sandbox; frame-ancestors 'self'",
+    );
     expect(response.headers.get("content-disposition")).toBe('inline; filename="diagram.svg"');
   });
 
@@ -80,8 +86,8 @@ describe("GET /api/assets/[...path]", () => {
     expect(fetchArtifact).not.toHaveBeenCalled();
   });
 
-  it("answers 404 alike for a reference that is not the key's, that names nothing, or that the store refused", async () => {
-    for (const code of ["forbidden", "not_found", "invalid_storage_uri", "store_refused"]) {
+  it("answers 404 alike for a reference that is not the key's and one that names nothing", async () => {
+    for (const code of ["forbidden", "not_found", "invalid_storage_uri"]) {
       fetchArtifact.mockRejectedValueOnce(
         new ArtifactFetchError("refused", "pipelex-storage://org/x.png", code),
       );
@@ -92,7 +98,17 @@ describe("GET /api/assets/[...path]", () => {
   });
 
   it("answers 502 for a fetch that failed on this side of the object", async () => {
-    for (const code of ["timeout", "network", "store_error", "too_large", "redirect_refused"]) {
+    // `store_refused` belongs here and not with the 404s: it is the store
+    // rejecting a signature this route has just minted, which is a clock, a
+    // key or a bucket policy — an outage, not a missing asset.
+    for (const code of [
+      "timeout",
+      "network",
+      "store_error",
+      "too_large",
+      "redirect_refused",
+      "store_refused",
+    ]) {
       fetchArtifact.mockRejectedValueOnce(
         new ArtifactFetchError("failed", "pipelex-storage://org/x.png", code),
       );
@@ -147,6 +163,41 @@ describe("GET /api/assets/[...path]", () => {
     response = await get(["org", "x.png"]);
     expect(response.status).toBe(502);
     expect((await response.json()).error.code).toBe("api_unreachable");
+  });
+
+  it("hands on a Content-Encoding the SDK left, so encoded bytes stay labelled as such", async () => {
+    // The SDK strips the pair only when fetch decoded the body, so a coding
+    // still on the response means the bytes really are still encoded.
+    fetchArtifact.mockResolvedValueOnce(
+      upstream(PNG_BYTES, {
+        "content-type": "image/png",
+        "content-encoding": "zstd",
+        "content-length": "8",
+      }),
+    );
+
+    const response = await get(["org", "x.png"]);
+
+    expect(response.headers.get("content-encoding")).toBe("zstd");
+    expect(response.headers.get("content-length")).toBe("8");
+  });
+
+  it("answers a HEAD probe even when the upstream stream refuses to be cancelled", async () => {
+    // A stream already locked or errored rejects on cancel, and the probe
+    // still has to answer with the route's own headers.
+    const refusing = {
+      status: 200,
+      headers: new Headers({ "content-type": "application/pdf" }),
+      body: { cancel: () => Promise.reject(new Error("already locked")) },
+    } as unknown as Response;
+    fetchArtifact.mockResolvedValueOnce(refusing);
+
+    const response = await HEAD(new Request("http://localhost/api/assets/org/x.pdf"), {
+      params: Promise.resolve({ path: ["org", "x.pdf"] }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-disposition")).toBe('inline; filename="x.pdf"');
   });
 
   it("accepts a plain-http store link only when the API itself is configured over plain http", async () => {

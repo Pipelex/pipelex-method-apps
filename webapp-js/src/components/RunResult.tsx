@@ -61,7 +61,7 @@ interface RunResultProps {
  * once in the root layout, above this: `assetPath` rewrites the reference onto
  * `/api/assets/…`, which `src/app/api/assets/[...path]/route.ts` streams through
  * the SDK's `fetchArtifact` on the server. The kernel asks that resolver before
- * it reads `public_url`, so the signed link never reaches the page and a
+ * it reads `public_url`, so the signed link is never what the browser fetches and a
  * picture cannot expire while the tab is open. The copy-URL control goes the
  * other way, through `resolveShareUrl`, a Server Action minting a fresh
  * presigned link per click — a same-origin path is useless on a clipboard.

@@ -49,4 +49,14 @@ describe("resolveShareUrl", () => {
     );
     await expect(resolveShareUrl("pipelex-storage://org/x.png")).resolves.toBeUndefined();
   });
+
+  it("refuses a reference past the bound the display half applies", async () => {
+    // The two halves of the contract stop at the same size: otherwise a
+    // megabyte-long string is forwarded to the platform's resolve route by the
+    // one that `assetPath` would have refused outright.
+    const huge = `pipelex-storage://org/${"x".repeat(4096)}.png`;
+
+    await expect(resolveShareUrl(huge)).resolves.toBeUndefined();
+    expect(resolveStorageUrl).not.toHaveBeenCalled();
+  });
 });

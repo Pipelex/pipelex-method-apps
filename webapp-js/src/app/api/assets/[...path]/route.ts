@@ -19,8 +19,8 @@ import { storageUriFromSegments } from "@/lib/storageAsset";
  * presigned link through the API key and returns the store's response as a
  * bounded stream: timed out, redirects refused, the byte cap enforced
  * mid-stream, no credential forwarded — and pipes the bytes back under the
- * headers `buildAssetHeaders` owns. The presigned link never reaches the
- * client, and the key never leaves `getPipelexClient()`.
+ * headers `buildAssetHeaders` owns. The presigned link is never what the
+ * browser fetches, and the key never leaves `getPipelexClient()`.
  *
  * Deliberately NOT a redirect to the store: a 3xx would put the presigned link
  * back in the browser, which is the problem the route exists to remove.
@@ -39,6 +39,32 @@ import { storageUriFromSegments } from "@/lib/storageAsset";
  * the store or inside it is `502`. The JSON body names the reason for whoever
  * opens the path by hand.
  */
+
+/**
+ * **The authorization seam — this template ships it open, and a real
+ * deployment must close it.**
+ *
+ * This route resolves any well-formed reference with the deployment's single
+ * API key, so as it stands anyone who can reach the app can read any object
+ * in the organization's storage whose path they hold — another person's run
+ * output, another person's uploaded input. That is the right default for a
+ * single-tenant demo where the app is the only reader, and the wrong one the
+ * moment the app serves more than one person.
+ *
+ * So put the check here: read the session, decide whether this caller may read
+ * this reference, and answer `false` if not — the caller then gets the same
+ * `404` as a reference that names nothing, which is what keeps the route from
+ * telling anyone what exists. The same question is asked of
+ * `resolveShareUrl` in `src/actions/shareUrl.ts`, which hands out a link that
+ * works outside the app entirely, and both have to answer it.
+ *
+ * Refusing to enumerate is not the same as refusing to serve: the `404` on a
+ * forbidden reference below hides WHICH objects exist, and this is what
+ * decides WHO may read one.
+ */
+async function mayRead(_request: Request, _uri: string): Promise<boolean> {
+  return true;
+}
 
 interface RouteContext {
   params: Promise<{ path: string[] }>;
@@ -67,6 +93,10 @@ async function serveAsset(
     return refusal(400, "invalid_asset_path", "The path is not a stored asset's path.");
   }
 
+  if (!(await mayRead(request, uri))) {
+    return refusal(404, "asset_not_found", "No stored asset at this path.");
+  }
+
   let upstream: Response;
   try {
     upstream = await getPipelexClient().fetchArtifact(uri, {
@@ -82,7 +112,14 @@ async function serveAsset(
   });
 
   if (method === "HEAD") {
-    await upstream.body?.cancel();
+    // A stream already errored or locked rejects on cancel, and this is the
+    // probe `<object data>` viewers make before every fetch: letting the
+    // rejection out would answer a generic 500 instead of these headers.
+    try {
+      await upstream.body?.cancel();
+    } catch {
+      // The bytes are not wanted either way.
+    }
     return new Response(null, { status: upstream.status, headers });
   }
   return new Response(upstream.body, { status: upstream.status, headers });
@@ -90,12 +127,14 @@ async function serveAsset(
 
 /**
  * The reference's own refusals — the resolve route's per-reference verdicts
- * (`invalid_storage_uri`, `forbidden`), a store that has no such object, and a
- * store refusing a freshly minted signature — all answer `404`, so a `403`
- * cannot be told from a `404` from outside. Everything else the fetch boundary
- * reports is this side's failure to reach the bytes.
+ * (`invalid_storage_uri`, `forbidden`) and a store that has no such object —
+ * all answer `404`, so a `403` cannot be told from a `404` from outside.
+ * Everything else the fetch boundary reports is this side's failure to reach
+ * the bytes, `store_refused` included: that is the store rejecting a signature
+ * this route has just minted, which means a clock, a signing key or a bucket
+ * policy — an outage to report as one, not an asset to call missing.
  */
-const NOT_FOUND_CODES = new Set(["invalid_storage_uri", "forbidden", "not_found", "store_refused"]);
+const NOT_FOUND_CODES = new Set(["invalid_storage_uri", "forbidden", "not_found"]);
 
 function refusalFor(err: unknown): Response {
   if (err instanceof ArtifactFetchError) {
