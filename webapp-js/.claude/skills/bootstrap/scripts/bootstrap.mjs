@@ -21,9 +21,9 @@
  *
  * A project does not inherit what only the template needs. The files of that
  * kind are removed whole (`REMOVALS`: the `make create` gesture with its test
- * and its doc), and the passages of shared files that describe them sit between
- * `template-only:begin` and `template-only:end` markers, which are removed with
- * everything between them.
+ * and its doc, and the tile e2e with its fixture), and the passages of shared
+ * files that describe them sit between `template-only:begin` and
+ * `template-only:end` markers, which are removed with everything between them.
  *
  * Every file it writes goes through the repo's own Prettier when Prettier is
  * installed, so `make all` is green straight after a run. The script only

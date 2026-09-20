@@ -56,6 +56,15 @@ function safeSegments(segments: readonly string[]): string[] | undefined {
 }
 
 /**
+ * A reference this app will act on: a storage URI within the same bound the
+ * display and path halves apply, so every seam that forwards one to the
+ * platform stops at the same size.
+ */
+export function isShareableStorageUri(value: unknown): value is string {
+  return isStorageUri(value) && value.length <= MAX_URI_LENGTH;
+}
+
+/**
  * The same-origin path for a stored asset, or `undefined` when `uri` is not a
  * well-formed `pipelex-storage://` reference — an `https:` or `data:` URL, for
  * instance, which the kernel paints as it is. `undefined` is the kernel's
@@ -67,15 +76,6 @@ function safeSegments(segments: readonly string[]): string[] | undefined {
  * route's `Content-Disposition` names the file by it, and the kernel decides
  * previewability from it when the payload states no `mime_type`.
  */
-/**
- * A reference this app will act on: a storage URI within the same bound the
- * display and path halves apply, so every seam that forwards one to the
- * platform stops at the same size.
- */
-export function isShareableStorageUri(value: unknown): value is string {
-  return isStorageUri(value) && value.length <= MAX_URI_LENGTH;
-}
-
 export function assetPath(uri: string): string | undefined {
   if (!isStorageUri(uri) || uri.length > MAX_URI_LENGTH) return undefined;
   const segments = safeSegments(uri.slice(PIPELEX_STORAGE_SCHEME.length).split("/"));
