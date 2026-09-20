@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.3.0] - 2026-09-20
+
+### Highlights
+
+**A run's files reach the browser through the app, not through the store.** The web app template mounts the form kernel's result environment and serves every `pipelex-storage://` reference from a route handler of its own, under header bounds it sets on each response, so the store's presigned link stays in the run's receipt and nothing paints from it. **The cost panel stops calling a partial sum a total**, naming a lower bound when priced and unrated calls are mixed. The template runs on form kernel 0.9.0, shows a durable run's id while it goes, and hardens `make add-method` against a concurrent run, a symlinked path and a platform-dependent bundle order.
 
 ### Added
 
@@ -23,7 +27,6 @@
 - **A created project's `bump-mthds-form` and `bump-sdk` skills install the version whose changelog they read**: each installs the chosen release by name, so naming a version that a patch release has since followed locks and tests that version, where raising the range and running `npm install` locked the later patch. Each also stops at a downgrade, which none of their steps can undo, instead of asking to confirm it.
 - **The dev server no longer prints uploaded files**: the web app template sets `logging.serverFunctions: false`, because `next dev` logs each Server Function call with its arguments and a file reaches its Server Action as a base64 `data:` URL — so every document dropped into a form was written to the log in full.
 - **A created project's docs no longer illustrate themselves with a method it never had**: `CLAUDE.md` names the example it walks through as one, and `docs/codegen.md`'s tree sketch uses placeholders.
-
 - **`loadMethodBundles` refuses a name that starts with a digit**: the web app template's bundle loader holds a method directory name to the rule `make add-method` derives one by, kebab-case with a letter first, so a name such as `3d-model`, which the scaffold refuses, is refused by the loader too.
 - **`loadMethodBundles` reads a bundle in codegen's order on Windows**: the loader sorts on each file's path inside the method directory written with `/`, as `npm run codegen` does, so a run sends `mthds_contents` in the order the generated types were projected from on every platform, where it used to put `steps2.mthds` before `steps/score.mthds` on Windows.
 - **`make add-method` runs one write at a time**: the write half holds a lock file, `.add-method.lock` at the app's root, and a second run that reaches it meanwhile is refused before writing anything, so a run that fails can no longer remove a generated tree another run has just written. A lock left by a run that was killed is named in the refusal, with whether its pid is still running, and is removed by hand.
