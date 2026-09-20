@@ -20,7 +20,14 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: "/:path*",
+        // Every path EXCEPT the assets route, which sets its own headers in
+        // `src/lib/assetHeaders.ts`. Two rules would collide there: a global
+        // `X-Frame-Options: DENY` blocks framing even same-origin, so a PDF
+        // result would no longer render in the kernel's document preview now
+        // that the preview's src is a path on this origin, and the global
+        // `Referrer-Policy` would contend with the stricter one the asset
+        // response asks for.
+        source: "/((?!api/assets/).*)",
         headers: [
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },

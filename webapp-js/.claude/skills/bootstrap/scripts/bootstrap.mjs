@@ -21,9 +21,9 @@
  *
  * A project does not inherit what only the template needs. The files of that
  * kind are removed whole (`REMOVALS`: the `make create` gesture with its test
- * and its doc), and the passages of shared files that describe them sit between
- * `template-only:begin` and `template-only:end` markers, which are removed with
- * everything between them.
+ * and its doc, and the tile e2e with its fixture), and the passages of shared
+ * files that describe them sit between `template-only:begin` and
+ * `template-only:end` markers, which are removed with everything between them.
  *
  * Every file it writes goes through the repo's own Prettier when Prettier is
  * installed, so `make all` is green straight after a run. The script only
@@ -59,11 +59,21 @@ const CHARTER_MARKER = "This directory is a **template**.";
 // turns the template into a project — once, which is this run. The template's
 // release skill is not here: it releases the whole mono-repo and lives at its
 // root, outside the directory a project is copied from.
+//
+// The tile e2e is template machinery of the same kind: it creates an app from
+// this template in a temporary copy and scaffolds its own fixture into it, so
+// in a project that already registers a method `add-method` appends a second
+// entry, `MethodPage` switches to tabs, and the fixture's panel is `hidden` —
+// its controls leave the accessibility tree and the spec's first `fill` times
+// out, after paying for an `npm ci` and a dev-server boot. The spec proves the
+// TEMPLATE, and it belongs to the template alone.
 export const REMOVALS = [
   "scripts/create.mts",
   "scripts/lib/create.mts",
   "scripts/lib/create.test.mts",
   "docs/create.md",
+  "e2e/resultTile.spec.ts",
+  "e2e/fixtures/generate-image",
 ];
 
 // The npm script of the gesture REMOVALS takes away.

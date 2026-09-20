@@ -53,14 +53,20 @@ interface RunResultProps {
  * owns the shape, and a refused reference is reported rather than hidden.
  * `src/lib/resultUrls.ts` carries the rule and the deletion criteria.
  *
- * **Not wired yet, and deliberately:** a `pipelex-storage://` reference resolves
- * nowhere in a browser, and the kernel's seam for exchanging one is a
- * `<ResultEnvProvider resolveUrl>` mounted above this. The hosted runtime
- * returns a signed `public_url` beside the storage URI and the kernel's file
- * arms prefer it, so every file this template produces displays without one —
- * which is why a resolver over the SDK's `resolveStorageUrl` is a follow-up
- * rather than a prerequisite. Add it as one provider high in the tree, not as a
- * prop threaded through here.
+ * **A stored file paints through this app's own assets route.** A run's file
+ * comes back as a `pipelex-storage://` reference, which resolves nowhere in a
+ * browser, beside a signed `public_url` that expires in minutes and IS the
+ * credential to the object. The kernel's seam for exchanging the reference is
+ * `<ResultEnvProvider resolveUrl>`, and `src/components/ResultEnv.tsx` mounts it
+ * once in the root layout, above this: `assetPath` rewrites the reference onto
+ * `/api/assets/…`, which `src/app/api/assets/[...path]/route.ts` streams through
+ * the SDK's `fetchArtifact` on the server. The kernel asks that resolver before
+ * it reads `public_url`, so the signed link is never what the browser fetches and a
+ * picture cannot expire while the tab is open. The copy-URL control goes the
+ * other way, through `resolveShareUrl`, a Server Action minting a fresh
+ * presigned link per click — a same-origin path is useless on a clipboard.
+ * Nothing about that is threaded through here, which is the point of a
+ * provider high in the tree.
  */
 export function RunResult({ field, value, name }: RunResultProps) {
   const { value: shown, refused } = useMemo(() => scrubResultUrls(field, value), [field, value]);
