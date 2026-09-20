@@ -19,21 +19,22 @@ Show the user:
 2. What's actually installed: `node -p "require('./node_modules/@pipelex/mthds-form/package.json').version"`
 3. The latest published version: `npm view @pipelex/mthds-form version`
 4. Working tree status (`git status --short`)
+5. Whether either package is a local tarball: `make local-status` (see this repo's `CLAUDE.md` § "Local package development"). The installed version cannot answer this, because a local build carries the version it will be published as.
 
-**If the installed version doesn't match the `package.json` range**, this repo is very likely on a local tarball install from `make use-local`, which covers this package alongside the SDK (see the Makefile / this repo's `CLAUDE.md` § "Local package development"). A bump should target the _published_ package, not whatever's on disk from local development — tell the user and offer to run `make use-npm` first to get back to a clean baseline. Note that `make use-npm` restores **both** `@pipelex/mthds-form` and `@pipelex/sdk` to their latest published versions and re-pins `package.json` for both — if the user wants only this package restored, offer `npm install @pipelex/mthds-form@latest` instead. (`@latest` on purpose — the bare name would just re-resolve the stale caret range already in `package.json`.)
+**If `make local-status` reports `local`**, a bump should target the _published_ package, not whatever's on disk from local development — tell the user and offer `make use-npm-form` first (or `make use-npm` when the SDK is local too, since the kernel-only target refuses then). Both restore the version the lockfile pins and rewrite nothing, so the baseline they give is the one this bump moves from.
 
 If the working tree is dirty, don't stop — this repo's checks (`make all`) don't require a clean tree — but note it, since the diff you produce at the end will sit alongside whatever else is already staged/unstaged. Ask before touching `package.json`/`package-lock.json` if either is already dirty, since your edit will land on top of unrelated in-flight changes to the same files.
 
 ## Step 2 — Determine Target Version
 
-If current already equals latest, tell the user there's nothing to bump and stop (unless they explicitly want to re-pin a specific older/newer version).
+If current already equals latest, tell the user there's nothing to bump and stop (unless they name a newer version, published but not yet indexed).
 
 Otherwise use `AskUserQuestion` to confirm the target:
 
 - **Latest (`{npm view version}`)** — the default, recommended path.
 - **A specific version** — let the user type one (e.g. pinning to a version between current and latest, or ahead of latest if they published something not yet indexed).
 
-Store the result as `TARGET_VERSION` (no `v` prefix, e.g. `0.3.0`). Warn if it's a downgrade from what's installed and confirm that's intended.
+Store the result as `TARGET_VERSION` (no `v` prefix, e.g. `0.3.0`). If it is below what's installed, stop: a downgrade is not a bump. Undoing a release means reading its changelog backwards and reversing its migrations, which no step here does, so a rollback is the user's to plan by hand.
 
 ## Step 3 — Read What Changed
 
@@ -44,7 +45,7 @@ You need the kernel's `CHANGELOG.md` entries for every version strictly after th
 
 Extract the entries between `## [v{CURRENT}]` (exclusive) and `## [v{TARGET_VERSION}]` (inclusive) and present them to the user, grouped by version, newest first.
 
-**This changelog does not use a "Breaking —" bullet convention** (unlike the SDK's). It writes `### Added` / `### Changed` / `### Fixed` sections with a bold lead phrase per bullet, and flags impact in prose — "visible on the wire", a renamed export, a changed default. So instead of scanning for a marker, read each bullet against the seams this repo actually consumes, and call out every bullet that touches one:
+**This changelog marks a breaking change with `(Breaking)` at the end of a bullet's bold title**, and flags other impact in prose — "visible on the wire", a changed default. Every `(Breaking)` bullet needs a verdict here: where it reaches this repo, or the search that shows it does not. The marker narrows the reading without replacing it, because a change that breaks no kernel API can still reach one of this repo's seams — so read each bullet against the seams this repo actually consumes, and call out every bullet that touches one:
 
 - **The gate and readiness** — the two halves of one rule set, and the seam this repo leans on hardest. The server half is `src/lib/runInputs.ts`, which imports `gateRunInputs`, `getPipeIOContract`, `getPipeInputForm` and `describeValidationError`, plus the types `PipeIOContract`, `PipeIOContracts`, `InputForm`, `PipeInputFormDescriptor`, `RunInputsGateResult`, `Translate` and `ValidationMessageKey`; `requireContract` and `requireInputForm` are this repo's own throw-on-miss wrappers over the two lookups, not kernel exports. The browser half is `src/hooks/useRunInputs.ts`, which imports `fieldsForContract`, `computeReadiness` and `rjsfDataFromRunValues`. A semantics change on either side is what the browser/server invariant test (`src/lib/runInputs.test.ts`) exists to catch.
 
@@ -56,7 +57,7 @@ Extract the entries between `## [v{CURRENT}]` (exclusive) and `## [v{TARGET_VERS
   One cross-package detail worth knowing before a minor bump: `src/lib/fileEncoding.ts` takes its `PipeInputFormDescriptor` and `InputFormItem` types from **`@pipelex/sdk`**, while `src/lib/runInputs.ts` takes `PipeInputFormDescriptor` from the kernel. That is not two descriptions of one artifact — both packages `export * from "mthds/protocol"`, and both declare the same `mthds` range, so npm dedupes to one copy and the two imports resolve to the _same_ type. The hazard is that dedupe failing: if a kernel release moves to an `mthds` minor the installed SDK's range does not cover (npm treats a leading `0` as the major, so `^0.25.0` and `^0.26.0` do not overlap), npm installs two copies and the same-named type becomes two incompatible types. `make typecheck` then fails where `fileEncoding.ts` is handed a descriptor derived on the kernel side, with a message that names the type twice and explains nothing. `npm ls mthds` is the one-line diagnosis, and the cure is bumping `@pipelex/sdk` in the same commit.
 
 - **Theming and Tailwind** — `src/app/layout.tsx` imports `@pipelex/mthds-form/theme.css`, and `src/app/globals.css` (Tailwind v4 is configured in CSS; there is no `tailwind.config.ts`) keeps a **mirror of the kernel's own `src/styles/tailwind-entry.css` token block** as an `@theme inline` mapping (the shadcn semantic colors and radii) plus `@source "../../node_modules/@pipelex/mthds-form/dist"`. A release that adds tokens, changes the form a token value takes, or moves the CSS entry points needs that mirror re-synced by hand — nothing automated catches it. A release that moves the kernel's own Tailwind major is the loudest case: 0.8.0 did, and a host on the previous major compiles the renamed utilities to nothing rather than failing.
-- **The generated contracts type** — every `src/generated/*/contracts.ts` imports `type PipeIOContracts` from the kernel. Those files are generated and **never hand-edited** (see "Generated types" in this repo's `CLAUDE.md`): if a release renames or reshapes that type, the fix routes through the emitter upstream and `npm run codegen`, not through an edit to `src/generated/`.
+- **The generated contracts types** — every `src/generated/*/contracts.ts` imports `InputForm`, `OutputForm` and `PipeIOContracts` from the kernel. That import line is written by this repo's own generator, `renderContracts` in `scripts/lib/shared.mts`, around the payload the engine returns, and the recorded contracts under `src/test/fixtures/contracts/` carry the same line. So a release that renames one of those types is a mechanical migration of `renderContracts` and the recorded copies (Step 4), followed by `npm run codegen` to rewrite `src/generated/`, which is **never hand-edited** (see "Generated types" in this repo's `CLAUDE.md`). A release that reshapes what a type describes is different: the payload comes from the engine, so that is a "needs manual review" item. `scripts/lib/scaffold-tree.test.mts` type-checks freshly emitted trees against the installed kernel, so `make test` surfaces either case.
 
 Everything else (internal refactors, non-breaking additions, docs) is FYI only — mention briefly, don't dwell.
 
@@ -73,9 +74,8 @@ Not every impactful change is a mechanical rename — most of this kernel's chan
 
 ## Step 5 — Apply the Version Bump
 
-1. Edit the `"@pipelex/mthds-form"` line in `package.json` to `"^{TARGET_VERSION}"` — keep the existing caret-pin style, don't switch to an exact pin.
-2. Run `npm install` (not `--package-lock-only` — this needs the actual new package contents in `node_modules`: the `@source` directive and the CSS imports read the installed `dist/`, not the manifest).
-3. Confirm it landed: `node -p "require('./node_modules/@pipelex/mthds-form/package.json').version"` should now read `TARGET_VERSION`.
+1. Run `npm install @pipelex/mthds-form@{TARGET_VERSION}`. It rewrites the `"@pipelex/mthds-form"` line in `package.json` to `"^{TARGET_VERSION}"`, keeping the caret-pin style, and locks `TARGET_VERSION` itself. Editing the range by hand and running a bare `npm install` would lock the highest release that range admits instead, which is later than `TARGET_VERSION` whenever a patch release followed it — and Step 3 read the changelog only as far as `TARGET_VERSION`. Don't add `--package-lock-only`: this needs the actual new package contents in `node_modules` (the `@source` directive and the CSS imports read the installed `dist/`, not the manifest).
+2. Confirm it landed: `node -p "require('./node_modules/@pipelex/mthds-form/package.json').version"` should now read `TARGET_VERSION`.
 
 ## Step 6 — Run Checks
 
@@ -88,7 +88,7 @@ Then, conditionally:
 
 - **If any changelog entry is wire-visible or touches the gate**, offer `make test-e2e`. The wire shape a run submits only travels form → Server Action → live API on the e2e path; unit tests mock the SDK and can pass while the API rejects the new shape. It costs an LLM call per run and needs `PIPELEX_API_KEY`, so only run it with explicit user approval.
 - **If any changelog entry touches the controls, `styles.css`/`theme.css`, or Tailwind classes**, the deterministic purge check now runs in `make test` as `src/app/globals.test.ts` (it compiles the stylesheet with and without the `@source` lines and requires the difference; `docs/input-form.md` explains why a class-name grep cannot serve here). Confirm it passed, then offer `make dev` for a visual pass over every method form. A styling regression here is silent: the form still renders, just subtly unstyled.
-- **If any changelog entry renames or reshapes `PipeIOContracts`** (or anything else `contracts.ts` carries), run `npm run codegen` (needs `PIPELEX_API_KEY`) and commit the regenerated trees with the bump — never patch `src/generated/` by hand.
+- **If any changelog entry renames or reshapes a type `contracts.ts` imports** (`InputForm`, `OutputForm`, `PipeIOContracts`), run `npm run codegen` after Step 4 has migrated `renderContracts` (needs `PIPELEX_API_KEY`) and commit the regenerated trees with the bump — never patch `src/generated/` by hand.
 - **If the bump changed the kernel's minor, run `npm ls mthds`** and confirm it still reports one deduped copy. Two copies mean the kernel and `@pipelex/sdk` have drifted onto non-overlapping `mthds` ranges, which splits the shared protocol types — see the React-controls bullet in Step 3. Whether or not `make typecheck` has already failed on it, the fix is to bump `@pipelex/sdk` alongside (the `bump-sdk` skill), not to work around the type.
 
 ## Step 7 — Update This Repo's CHANGELOG.md

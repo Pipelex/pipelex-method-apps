@@ -265,6 +265,15 @@ export function readMethodProse(blueprint: unknown): MethodProse {
   return { description: nonEmptyString(fields.description), pipeDescriptions };
 }
 
+/**
+ * Everything the method says about itself, as one string to read spellings out
+ * of. Order is the domain's description first, then each pipe's, so the word a
+ * caller sees first is the one the method leads with.
+ */
+export function methodVocabulary(prose: MethodProse): string {
+  return [prose.description ?? "", ...Object.values(prose.pipeDescriptions)].join(" ");
+}
+
 /** The three `/v1/validate` payloads `contracts.ts` is rendered from. */
 export interface ValidateArtifacts {
   pipeIoContracts: PipeIOContracts;

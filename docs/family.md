@@ -11,14 +11,15 @@ GitHub's **Use this template** button is not the way in. It copies a whole repos
 ## The layout
 
 ```
-Makefile                  the root gate: family checks, then each template's targets
-VERSION                   the family's version, one line
-CHANGELOG.md              the family's changelog
-.claude/skills/release/   the one release skill
-.github/workflows/        the root twins of each template's workflows, and family-check.yml
-.husky/pre-commit         runs each touched template's own hook from inside it
-scripts/                  the root's own tooling (workflows.mjs, versions.mjs) and its tests
-webapp-js/                the Next.js web app template — a complete project on its own
+Makefile                         the root gate: family checks, then each template's targets
+VERSION                          the family's version, one line
+CHANGELOG.md                     the family's changelog
+.claude/skills/release/          the one release skill
+.claude/skills/bump-mthds-form/  moves every template onto a newer @pipelex/mthds-form
+.github/workflows/               the root twins of each template's workflows, and family-check.yml
+.husky/pre-commit                runs each touched template's own hook from inside it
+scripts/                         the root's own tooling (workflows.mjs, versions.mjs) and its tests
+webapp-js/                       the Next.js web app template — a complete project on its own
 ```
 
 Planned directories, not here yet: `cli-js/`, `cli-python/` and `webapp-python/`.
@@ -27,7 +28,7 @@ Planned directories, not here yet: `cli-js/`, `cli-python/` and `webapp-python/`
 
 ## The root gate
 
-The root `Makefile` names the templates once, in `TEMPLATES`, and each of `install`, `check`, `lint`, `format`, `format-check`, `typecheck`, `test`, `agent-test`, `build`, `lock`, `clean`, `use-local` and `use-npm` runs the same target in every template, stopping at the first failure. `check` and `test` first run what belongs to the family:
+The root `Makefile` names the templates once, in `TEMPLATES`, and each of `install`, `check`, `lint`, `format`, `format-check`, `typecheck`, `test`, `agent-test`, `build`, `lock`, `clean`, `use-local`, `use-local-form`, `use-npm`, `use-npm-form` and `local-status` runs the same target in every template, stopping at the first failure. `check` and `test` first run what belongs to the family:
 
 - **`check-versions`** — `scripts/versions.mjs`. The family carries one version, in `VERSION`. Each template's manifest carries a version too, because a project keeps that manifest, and the check fails when any of them disagrees with `VERSION`. It reads a template's `package.json`, or the `[project]` table of its `pyproject.toml`.
 - **`check-workflows`** — `scripts/workflows.mjs --check`, described in the next section.
@@ -62,13 +63,17 @@ The root's own files pass through no hook; `make check-family` holds them to Pre
 
 ## The sibling packages
 
-In the Pipelex workspace, the `pipelex-sdk-js` and `mthds-form` checkouts sit beside this repository, two levels above a template's directory. A template's `make use-local` looks for them in its parent directory unless `SIBLINGS_DIR` says otherwise, and the root's `make use-local` passes `SIBLINGS_DIR=../..` to every template.
+In the Pipelex workspace, the `pipelex-sdk-js` and `mthds-form` checkouts sit beside this repository, two levels above a template's directory. A template's `make use-local` and `make use-local-form` look for them in its parent directory unless `SIBLINGS_DIR` says otherwise, and the root's targets of those names pass `SIBLINGS_DIR=../..` to every template. Switching back with `make use-npm` or `make use-npm-form` restores the version each template's lockfile pins and rewrites nothing, so a switch never moves a range: that is what the bump skills below are for.
+
+## Moving the templates onto a newer form kernel
+
+`@pipelex/mthds-form` and `@pipelex/sdk` sit in a template's manifest as pre-1.0 caret ranges, which npm never resolves across a minor, so moving either is a deliberate edit. The form kernel is moved from the root, by `.claude/skills/bump-mthds-form/`: it moves every template whose manifest lists the kernel in one change, runs the root gate, and writes the entry in the root changelog. Which files of a template a kernel release can reach is the template's own knowledge, so the root skill reads it from the template's `bump-mthds-form` skill, which travels into every project and is the one a project runs. `@pipelex/sdk` has no root skill: its bump runs inside a template, with that template's `bump-sdk`.
 
 ## Adding a template
 
 A new template is a directory that works on its own, then joins the family:
 
-1. It carries a `Makefile` with every target the root delegates, a manifest whose version is the family's, a `CLAUDE.md`, and whatever its projects need, including its own `.github/workflows/`.
+1. It carries a `Makefile` with every target the root delegates, a manifest whose version is the family's, a `CLAUDE.md`, and whatever its projects need, including its own `.github/workflows/` and, when it depends on `@pipelex/mthds-form`, a `bump-mthds-form` skill naming the files a kernel release can reach, which the root's skill of that name reads.
 2. Its name joins `TEMPLATES` in the root `Makefile`.
 3. `make workflows` renders its twins, and the renderer's refusals say what to change in its workflows if it cannot. A template that is not a Node project needs the renderer's cache line taught its own lock file first.
 4. The release skill names its manifest under **Version files and the lock** and adds a `git show origin/main:<its manifest>` line under **What ships**, and the root `README.md` lists it.

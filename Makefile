@@ -1,4 +1,4 @@
-.PHONY: help install hooks check check-family check-versions check-workflows workflows lint format format-check typecheck test test-family agent-test build all lock clean use-local use-npm ul un
+.PHONY: help install hooks check check-family check-versions check-workflows workflows lint format format-check typecheck test test-family agent-test build all lock clean use-local use-local-form use-npm use-npm-form local-status ul un
 
 # The family's root gate. Each template is a directory with its own Makefile,
 # copied out whole into the projects created from it, so every target here
@@ -99,8 +99,17 @@ clean: ## Remove every template's build artifacts and caches
 use-local: ## Install the workspace's pipelex-sdk-js and mthds-form checkouts into every template
 	$(call each,use-local SIBLINGS_DIR=../..)
 
-use-npm: ## Restore the npm-published @pipelex packages in every template
+use-local-form: ## Install the workspace's mthds-form checkout alone into every template
+	$(call each,use-local-form SIBLINGS_DIR=../..)
+
+use-npm: ## Restore the @pipelex packages each template's lockfile pins
 	$(call each,use-npm)
+
+use-npm-form: ## Restore the @pipelex/mthds-form version each template's lockfile pins
+	$(call each,use-npm-form)
+
+local-status: ## Say, for every template, whether each @pipelex package comes from a sibling checkout or from npm
+	$(call each,local-status)
 
 ul: use-local ## Alias for use-local
 un: use-npm ## Alias for use-npm

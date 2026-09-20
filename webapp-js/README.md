@@ -47,7 +47,7 @@ The command refuses rather than overwriting a slice that already exists, and `DR
 2. The Server Action gates the inputs against the same committed contract — a Server Action is a public endpoint, so the browser's check is only UX — and checks any file reference's scheme, type and size.
 3. The SDK runs the method: `execute` in **Blocking** mode, or `start` and a poll loop in **Durable** mode, the default, which survives the hosted gateway's ~30s synchronous cap and streams live status.
 4. A narrower validates the main output against the zod schema generated from the method's contract.
-5. `<RunResult>` renders the validated output from the method's output-form descriptor, or `<ErrorDisplay>` shows a classified error.
+5. `<RunResult>` renders the validated output from the method's output-form descriptor, or `<ErrorDisplay>` shows a classified error. A file the run produced is streamed from the app's own origin through `/api/assets/…`, so the store's signed link is never what the browser fetches (the run's JSON receipt still carries it for a reader who opens that view), and `<CostReport>` shows what the run consumed.
 
 [`docs/input-form.md`](docs/input-form.md) covers the forms and result views, and [`docs/codegen.md`](docs/codegen.md) covers the generated types and the checks that keep them current.
 
@@ -95,7 +95,10 @@ Widen the host only on a network you trust, for a container or to open the app o
 | `make check`          | lint + format-check + typecheck + codegen-check                                                                                     |
 | `make all`            | check + test + build                                                                                                                |
 | `make use-local`      | Install the sibling `../pipelex-sdk-js` and `../mthds-form` checkouts into `node_modules` (`SIBLINGS_DIR=` names another directory) |
-| `make use-npm`        | Restore the published `@pipelex/sdk` and `@pipelex/mthds-form`                                                                      |
+| `make use-local-form` | Install the sibling `../mthds-form` checkout alone                                                                                  |
+| `make use-npm`        | Restore the `@pipelex/sdk` and `@pipelex/mthds-form` versions the lockfile pins                                                     |
+| `make use-npm-form`   | Restore the `@pipelex/mthds-form` version the lockfile pins                                                                         |
+| `make local-status`   | Say whether each `@pipelex` package comes from a sibling checkout or from npm                                                       |
 
 `make help` lists them all.
 

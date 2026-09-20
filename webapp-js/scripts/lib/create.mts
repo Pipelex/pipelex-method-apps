@@ -44,10 +44,12 @@ import {
   printPlan,
   ReportedFailure,
   resolveDeps,
+  respellAcronyms,
   writeAddMethod,
   type AddMethodDeps,
   type AddMethodPlan,
 } from "./add-method.mts";
+import { methodVocabulary } from "./generate.mts";
 import { REPO_ROOT } from "./shared.mts";
 
 const { loadEnvConfig } = nextEnv;
@@ -207,8 +209,15 @@ export function oneLine(text: string): string {
  */
 export function deriveIdentity(plan: AddMethodPlan, args: CreateArgs): Identity {
   const name = args.name ?? plan.names.slug;
-  const title = present(args.title) ?? present(plan.catalog?.name) ?? titleFromName(name);
   const { prose } = plan.fetched.contracts;
+  // A title the caller passed, or a catalog name somebody chose, is left
+  // exactly as given; only the one derived from the package name is respelled,
+  // so `cv-screening` becomes "CV Screening" where the method's own prose says
+  // "CVs" rather than the "Cv Screening" a word-by-word title case produces.
+  const title =
+    present(args.title) ??
+    present(plan.catalog?.name) ??
+    respellAcronyms(titleFromName(name), methodVocabulary(prose));
   const description =
     present(args.description) ??
     present(plan.catalog?.description) ??

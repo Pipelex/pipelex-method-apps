@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { loadMethodBundles } from "./loadBundle";
+import { bundleOrder, loadMethodBundles } from "./loadBundle";
 
 let methodsDir: string;
 
@@ -34,6 +34,18 @@ describe("loadMethodBundles", () => {
     ]);
   });
 
+  // Codegen's walk compares `/`-joined relative paths, where `/` sorts before
+  // `2`: a directory's files come before a sibling file extending its name.
+  it("orders a directory's files before a sibling that extends its name, as codegen does", async () => {
+    await put("cv-screening/steps2.mthds", "STEPS2");
+    await put("cv-screening/steps/score.mthds", "SCORE");
+
+    await expect(loadMethodBundles("cv-screening", methodsDir)).resolves.toEqual([
+      "SCORE",
+      "STEPS2",
+    ]);
+  });
+
   it("reads only the named method's directory", async () => {
     await put("first/main.mthds", "FIRST");
     await put("second/main.mthds", "SECOND");
@@ -55,10 +67,26 @@ describe("loadMethodBundles", () => {
     });
   });
 
-  it.each(["../escape", "Upper", "a/b", ""])(
+  it.each(["../escape", "Upper", "a/b", "", "3d-model"])(
     "refuses a name that is not kebab-case: %j",
     async (name) => {
       await expect(loadMethodBundles(name, methodsDir)).rejects.toThrow(/not a method directory/);
     },
   );
+});
+
+describe("bundleOrder", () => {
+  it("sorts on the /-joined path under the method directory on Windows too", () => {
+    const dir = "C:\\app\\methods\\cv-screening";
+    const files = ["steps2.mthds", "steps\\score.mthds", "main.mthds"].map(
+      (relative) => `${dir}\\${relative}`,
+    );
+
+    // Sorting the absolute paths would put steps2.mthds first: `\` sorts after `2`.
+    expect(bundleOrder(dir, files, path.win32)).toEqual([
+      "main.mthds",
+      "steps/score.mthds",
+      "steps2.mthds",
+    ]);
+  });
 });

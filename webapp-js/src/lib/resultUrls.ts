@@ -13,7 +13,12 @@
  * sandboxes, which is what says the omission is a gap rather than a posture.
  *
  * A run's output is model-shaped data crossing a trust boundary, exactly like a
- * run's input, and `checkFileInputs` is the rule on the way in. This is the same
+ * run's input, and `checkFileInputs` is the rule on the way in. The one string
+ * the kernel paints that this never judges is the host's own resolver's answer:
+ * `assetPath` (`src/lib/storageAsset.ts`) maps a `pipelex-storage://` reference
+ * onto this app's `/api/assets/…` route, whose response headers refuse to let the
+ * bytes act as a document — that path is this app's, not the model's, and it is
+ * the route, not this walk, that guards it. This is the same
  * rule on the way out, and it is deliberately the *only* place in this template
  * that re-reads a result: the shape is the generated binder's job, and this
  * proves the one thing a JSON Schema cannot state — "a reference a browser may

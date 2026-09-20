@@ -9,10 +9,25 @@ const nextConfig = {
       bodySizeLimit: "12mb",
     },
   },
+  // `next dev` logs every Server Function call with its arguments, and a file
+  // input reaches its Server Action as a base64 `data:` URL — so every document
+  // a user drops into the form (a CV, a contract, an invoice) was printed whole
+  // into the dev server's log. Only the object form turns that one log off:
+  // `logging: false` would silence the fetch logs too.
+  logging: {
+    serverFunctions: false,
+  },
   async headers() {
     return [
       {
-        source: "/:path*",
+        // Every path EXCEPT the assets route, which sets its own headers in
+        // `src/lib/assetHeaders.ts`. Two rules would collide there: a global
+        // `X-Frame-Options: DENY` blocks framing even same-origin, so a PDF
+        // result would no longer render in the kernel's document preview now
+        // that the preview's src is a path on this origin, and the global
+        // `Referrer-Policy` would contend with the stricter one the asset
+        // response asks for.
+        source: "/((?!api/assets/).*)",
         headers: [
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-Content-Type-Options", value: "nosniff" },
