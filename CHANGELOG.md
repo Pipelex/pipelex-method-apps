@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **The web app template runs on `@pipelex/sdk` 0.19.0**: `prepareInputs` now refuses when the API states that it determined no entry pipe, where it used to fall back to the closure's `main_pipe`. Nothing changes for a project made from the template, because every action `make add-method` writes already names the pipe it runs — the scaffold resolves that ref when it writes the action, so a method the API states no default for still runs.
+
+### Fixed
+
+- **The web app template's guide no longer calls an intermediate stuff unreachable**: it said `RunResults` surfaces only the main output and that reading a named stuff would need an addition to the SDK, which `@pipelex/sdk` 0.18.0 had already made untrue by carrying the run's `working_memory`. The guide now says where each run path has it, and which one line an app adds to read it on both.
+
 ## [v0.3.0] - 2026-09-20
 
 ### Highlights
