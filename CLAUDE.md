@@ -8,7 +8,7 @@ The family of Pipelex method templates: one directory per shape and language, ea
 | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `webapp-js/` | The Next.js 16 web app template, package `pipelex-method-webapp-js`: an app that renders each method's input form and result view from its contract. **Its own [`CLAUDE.md`](webapp-js/CLAUDE.md) is the guide for any work inside it.** |
 
-The root carries the gate (`Makefile`), the family's version (`VERSION`) and changelog (`CHANGELOG.md`), the release skill (`.claude/skills/release/`) and the skill that moves every template onto a newer form kernel (`.claude/skills/bump-mthds-form/`), the root twins of the templates' workflows and `family-check.yml` (`.github/workflows/`), the pre-commit hook that runs each template's own (`.husky/pre-commit`), and the root's tooling with its tests (`scripts/`).
+The root carries the gate (`Makefile`), the family's version (`VERSION`) and changelog (`CHANGELOG.md`), the release skill (`.claude/skills/release/`) and the skills that move every template onto a newer form kernel or SDK (`.claude/skills/bump-mthds-form/`, `.claude/skills/bump-sdk/`), the root twins of the templates' workflows and `family-check.yml` (`.github/workflows/`), the pre-commit hook that runs each template's own (`.husky/pre-commit`), and the root's tooling with its tests (`scripts/`).
 
 ## Rules
 

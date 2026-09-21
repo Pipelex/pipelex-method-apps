@@ -16,6 +16,7 @@ VERSION                          the family's version, one line
 CHANGELOG.md                     the family's changelog
 .claude/skills/release/          the one release skill
 .claude/skills/bump-mthds-form/  moves every template onto a newer @pipelex/mthds-form
+.claude/skills/bump-sdk/         moves every template onto a newer @pipelex/sdk
 .github/workflows/               the root twins of each template's workflows, and family-check.yml
 .husky/pre-commit                runs each touched template's own hook from inside it
 scripts/                         the root's own tooling (workflows.mjs, versions.mjs) and its tests
@@ -65,15 +66,15 @@ The root's own files pass through no hook; `make check-family` holds them to Pre
 
 In the Pipelex workspace, the `pipelex-sdk-js` and `mthds-form` checkouts sit beside this repository, two levels above a template's directory. A template's `make use-local` and `make use-local-form` look for them in its parent directory unless `SIBLINGS_DIR` says otherwise, and the root's targets of those names pass `SIBLINGS_DIR=../..` to every template. Switching back with `make use-npm` or `make use-npm-form` restores the version each template's lockfile pins and rewrites nothing, so a switch never moves a range: that is what the bump skills below are for.
 
-## Moving the templates onto a newer form kernel
+## Moving the templates onto a newer package
 
-`@pipelex/mthds-form` and `@pipelex/sdk` sit in a template's manifest as pre-1.0 caret ranges, which npm never resolves across a minor, so moving either is a deliberate edit. The form kernel is moved from the root, by `.claude/skills/bump-mthds-form/`: it moves every template whose manifest lists the kernel in one change, runs the root gate, and writes the entry in the root changelog. Which files of a template a kernel release can reach is the template's own knowledge, so the root skill reads it from the template's `bump-mthds-form` skill, which travels into every project and is the one a project runs. `@pipelex/sdk` has no root skill: its bump runs inside a template, with that template's `bump-sdk`.
+`@pipelex/mthds-form` and `@pipelex/sdk` sit in a template's manifest as pre-1.0 caret ranges, which npm never resolves across a minor, so moving either is a deliberate edit. Each is moved from the root, the kernel by `.claude/skills/bump-mthds-form/` and the SDK by `.claude/skills/bump-sdk/`: a skill moves every template whose manifest lists its package in one change, runs the root gate, and writes the entry in the root changelog. Which files of a template a release can reach is the template's own knowledge, so a root skill reads it from that template — the kernel's from its `bump-mthds-form` skill, the SDK's from its `bump-sdk` skill and the call path its `CLAUDE.md` names. Those template skills travel into every project made from one, and are what a project runs. What stays at the root is the seam no project has: the code the scaffold emits, which is text in a template and compiled only once a project has been created from it.
 
 ## Adding a template
 
 A new template is a directory that works on its own, then joins the family:
 
-1. It carries a `Makefile` with every target the root delegates, a manifest whose version is the family's, a `CLAUDE.md`, and whatever its projects need, including its own `.github/workflows/` and, when it depends on `@pipelex/mthds-form`, a `bump-mthds-form` skill naming the files a kernel release can reach, which the root's skill of that name reads.
+1. It carries a `Makefile` with every target the root delegates, a manifest whose version is the family's, a `CLAUDE.md`, and whatever its projects need, including its own `.github/workflows/` and, when it depends on `@pipelex/mthds-form` or on `@pipelex/sdk`, the `bump-mthds-form` and `bump-sdk` skills naming the files a release of each can reach, which the root's skills of those names read.
 2. Its name joins `TEMPLATES` in the root `Makefile`.
 3. `make workflows` renders its twins, and the renderer's refusals say what to change in its workflows if it cannot. A template that is not a Node project needs the renderer's cache line taught its own lock file first.
 4. The release skill names its manifest under **Version files and the lock** and adds a `git show origin/main:<its manifest>` line under **What ships**, and the root `README.md` lists it.
