@@ -73,7 +73,7 @@ make -C my-app serve
 
 `VERSION` is the family's version, and the release reads it. The release skill, `.claude/skills/release/SKILL.md`, bumps `VERSION`, every template's manifest and every initializer's together, re-locks each template, writes the entry in the root `CHANGELOG.md`, and runs `make all`.
 
-The merge to `main` publishes the initializer. `.github/workflows/release.yml`, hand-written rather than a twin, runs on the push: it reads the version from `initializers/js/package.json`, does nothing when npm already has it, asserts the changelog's entry, packs the templates with `--publish`, runs `make test-family`, publishes through npm trusted publishing with provenance, and tags the commit `vX.Y.Z`. The templates themselves are never published: every template's manifest is private, and a template reaches a project through the initializer.
+The merge to `main` publishes the initializer. `.github/workflows/release.yml`, hand-written rather than a twin, runs on the push: it reads the version from `initializers/js/package.json`, does nothing when npm already has it, asserts the changelog's entry, packs the templates with `--publish`, runs `make test-family`, publishes through npm trusted publishing with provenance, and tags the commit `vX.Y.Z`. A later run that finds the version published but untagged backfills the tag on the commit npm recorded as the version's source, its `gitHead`, never on the commit that run stands on, and one run of the workflow goes at a time. The templates themselves are never published: every template's manifest is private, and a template reaches a project through the initializer.
 
 A template's own `CHANGELOG.md` only points at the root's. Its bootstrap replaces it with a project's first entry.
 

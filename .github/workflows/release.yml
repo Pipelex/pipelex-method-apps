@@ -9,6 +9,12 @@ on:
     branches:
       - main
 
+# One run at a time, so two pushes cannot race the publish or the tag. A run
+# is never cancelled for a newer one: a run that has published must tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: Publish the initializer
@@ -81,19 +87,35 @@ jobs:
       # the step above made and the tests read. Provenance is npm's own and is
       # unaffected.
       - name: Publish to npm
+        id: publish
         if: steps.published.outputs.already == 'false'
         working-directory: initializers/js
         run: npm publish --ignore-scripts --access public --provenance
 
       # Not gated on the publish: a run that published but failed before the
-      # tag must be able to backfill it when re-run.
+      # tag must be able to backfill it when re-run. The tag goes on the commit
+      # the version was published from: this one when this run published it,
+      # and otherwise the gitHead npm recorded, never the commit a later push
+      # that did not move the version happens to stand on.
       - name: Tag the release if the tag is missing
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          PUBLISHED_HERE: ${{ steps.publish.outcome == 'success' }}
         run: |
           if git ls-remote --exit-code origin "refs/tags/v$VERSION" > /dev/null 2>&1; then
             echo "The tag v$VERSION exists already"
-          else
-            git tag "v$VERSION"
-            git push origin "v$VERSION"
+            exit 0
           fi
+          if [ "$PUBLISHED_HERE" = "true" ]; then
+            SOURCE="$GITHUB_SHA"
+          else
+            SOURCE=$(npm view "@pipelex/create-method-app@$VERSION" gitHead 2>/dev/null || true)
+            if [ -z "$SOURCE" ]; then
+              echo "::error::v$VERSION is published but untagged, and npm records no gitHead for it, so the commit it came from is unknown: tag that commit by hand."
+              exit 1
+            fi
+            git fetch --no-tags --depth=1 origin "$SOURCE"
+          fi
+          git tag "v$VERSION" "$SOURCE"
+          git push origin "v$VERSION"
+          echo "Tagged $SOURCE as v$VERSION"
