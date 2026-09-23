@@ -8,23 +8,20 @@ Looking for worked examples instead? [`pipelex-starter-js`](https://github.com/P
 
 ## Use this template
 
-This template is the `webapp-js/` directory of the [`pipelex-method-apps`](https://github.com/Pipelex/pipelex-method-apps) repository, which holds one template per shape and language. A project starts as a copy of this directory alone. Copy it into a new directory, make that a repository, and run one command with the method you have:
+This template is the `webapp-js/` directory of the [`pipelex-method-apps`](https://github.com/Pipelex/pipelex-method-apps) repository, which holds one template per shape and language. A project starts as a copy of this directory alone. The family's initializer writes it into a new directory, commits it as it came, and runs `make create` there with the method you have:
 
 ```bash
-src=$(mktemp -d)
-git clone --depth 1 https://github.com/Pipelex/pipelex-method-apps.git "$src"
-mkdir -p my-app && cp -R "$src/webapp-js/." my-app/    # my-app/ is new or empty
-cd my-app && git init
-
 export PIPELEX_API_KEY=…                               # from app.pipelex.com
 export PIPELEX_BASE_URL=https://api-dev.pipelex.com    # for now — see below
-make create METHOD=path/to/my_method.mthds
-make dev                                               # http://127.0.0.1:4300
+npm create @pipelex/method-app@latest my-app -- --method path/to/my_method.mthds
+make -C my-app serve                                   # the URL, once the page answers
 ```
 
-`METHOD` is a `.mthds` file or a directory of them, a method id from your organization's catalog (`mt_…`, from [app.pipelex.com](https://app.pipelex.com)), or a published package address (`github.com/Pipelex/methods/text_stats@v0.1.1`).
+`make serve` starts the dev server in the background, prints its URL once the page answers, and `make stop` stops it; `make dev` runs the same server in this terminal instead, on http://127.0.0.1:4300. The initializer's [README](https://github.com/Pipelex/pipelex-method-apps/tree/main/initializers/js#readme) lists its options, one per `make create` variable below.
 
-`make create` scaffolds the method, names the project after it (the package name, the title and the description all come from the method, and `NAME=`, `TITLE=` and `DESCRIPTION=` override them), writes `.env.local` from your shell, and runs `make all`. It commits nothing, so `git diff` shows everything it did. `DRY_RUN=1` prints the plan first. [`docs/create.md`](docs/create.md) is the reference.
+`--method`, which the initializer hands to `make create` as `METHOD`, is a `.mthds` file or a directory of them, a method id from your organization's catalog (`mt_…`, from [app.pipelex.com](https://app.pipelex.com)), or a published package address (`github.com/Pipelex/methods/text_stats@v0.1.1`).
+
+`make create` scaffolds the method, names the project after it (the package name, the title and the description all come from the method, and `--name`, `--title` and `--description` override them, which are `NAME=`, `TITLE=` and `DESCRIPTION=` to `make create` itself), writes `.env.local` from your shell, and runs `make all`. It commits nothing, so `git diff` against the initializer's pristine commit shows everything it did. `--dry-run` (`DRY_RUN=1`) prints the plan first. [`docs/create.md`](docs/create.md) is the reference.
 
 To choose every value yourself instead, open the repository in [Claude Code](https://claude.com/claude-code), run `/bootstrap`, then `make add-method METHOD=…`.
 
@@ -79,26 +76,30 @@ A variable already exported in your shell wins over `.env.local`.
 
 Widen the host only on a network you trust, for a container or to open the app on another device: `make dev APP_HOST=0.0.0.0`. The Makefile prints a warning each time a server starts beyond loopback. `npm run dev` and `npm run start` read the same two variables and fall back to the same defaults.
 
+`make serve` runs the dev server in the background and never beyond loopback: it refuses an `APP_HOST` that is not, and it stops a server that turns out to listen anywhere else before a page can compile. It takes `APP_PORT` when you give one, and otherwise the first port from 4300 to 4309 that no other directory holds. It then checks that the listener is the server it started, requests the page, and ends with one line: `serving http://127.0.0.1:4300/ — "<title>"`, or a refusal or a failure naming its cause. The server's log is `.serve/server.log`. Running it again reports the same server as `already-serving`, and a server you started here with `make dev` is reported too and left alone. Two runs in one checkout take turns, the second waiting for the first. `make stop` stops only what `make serve` started. It needs `lsof`, which macOS ships; on Linux, install it from your distribution's packages if `make serve` says it is missing, BusyBox's included.
+
 ## Make targets
 
-| Target                | Purpose                                                                                                                             |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `make dev`            | Start the Next.js dev server on `127.0.0.1:4300` — see [Where the app listens](#where-the-app-listens)                              |
-| `make build`          | Production build                                                                                                                    |
-| `make create`         | Turn the template into the app for one method — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                             |
-| `make add-method`     | Scaffold a method into the app — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                                            |
-| `make codegen`        | Regenerate `src/generated/` from `methods/` (needs an API key)                                                                      |
-| `make codegen-check`  | Prove `src/generated/` is current — offline, no key                                                                                 |
-| `make codegen-verify` | Ask the API whether the committed types still match the methods (needs an API key)                                                  |
-| `make test`           | Unit tests                                                                                                                          |
-| `make test-e2e`       | **Optional** Playwright e2e — a live spec costs an LLM call (prompts first; auto-skips without a key)                               |
-| `make check`          | lint + format-check + typecheck + codegen-check                                                                                     |
-| `make all`            | check + test + build                                                                                                                |
-| `make use-local`      | Install the sibling `../pipelex-sdk-js` and `../mthds-form` checkouts into `node_modules` (`SIBLINGS_DIR=` names another directory) |
-| `make use-local-form` | Install the sibling `../mthds-form` checkout alone                                                                                  |
-| `make use-npm`        | Restore the `@pipelex/sdk` and `@pipelex/mthds-form` versions the lockfile pins                                                     |
-| `make use-npm-form`   | Restore the `@pipelex/mthds-form` version the lockfile pins                                                                         |
-| `make local-status`   | Say whether each `@pipelex` package comes from a sibling checkout or from npm                                                       |
+| Target                    | Purpose                                                                                                                             |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `make dev`                | Start the Next.js dev server on `127.0.0.1:4300` — see [Where the app listens](#where-the-app-listens)                              |
+| `make serve`              | Start the dev server in the background, prove the page answers, and print its URL                                                   |
+| `make stop`               | Stop the dev server `make serve` started                                                                                            |
+| `make build`              | Production build                                                                                                                    |
+| `make create`             | Turn the template into the app for one method — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                             |
+| `make add-method`         | Scaffold a method into the app — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                                            |
+| `make codegen`            | Regenerate `src/generated/` from `methods/` (needs an API key)                                                                      |
+| `make codegen-check`      | Prove `src/generated/` is current — offline, no key                                                                                 |
+| `make codegen-verify`     | Ask the API whether the committed types still match the methods (needs an API key)                                                  |
+| `make test`               | Unit tests                                                                                                                          |
+| `make test-e2e`           | **Optional** Playwright e2e — a live spec costs an LLM call (prompts first; auto-skips without a key)                               |
+| `make check`              | lint + format-check + typecheck + codegen-check                                                                                     |
+| `make all`                | check + test + build                                                                                                                |
+| `make use-local`          | Install the sibling `../pipelex-sdk-js` and `../mthds-form` checkouts into `node_modules` (`SIBLINGS_DIR=` names another directory) |
+| `make use-local-form`     | Install the sibling `../mthds-form` checkout alone                                                                                  |
+| `make use-published`      | Restore the `@pipelex/sdk` and `@pipelex/mthds-form` versions the lockfile pins                                                     |
+| `make use-published-form` | Restore the `@pipelex/mthds-form` version the lockfile pins                                                                         |
+| `make local-status`       | Say whether each `@pipelex` package comes from a sibling checkout or from npm                                                       |
 
 `make help` lists them all.
 

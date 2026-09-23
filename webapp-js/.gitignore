@@ -40,6 +40,9 @@ test-results/
 # make add-method's write lock, present only while a run writes
 /.add-method.lock
 
+# make serve's state and the log of the server it started
+/.serve/
+
 # claude code local settings (per-user, never commit)
 .claude/settings.local.json
 

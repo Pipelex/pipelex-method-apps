@@ -683,6 +683,7 @@ async function runCreateInner(argv: readonly string[], given?: CreateDeps): Prom
       "",
       "Next:",
       `  make dev                  # ${appUrl(process.env)}`,
+      "  make serve                # the same server in the background, proven; make stop stops it",
       "  make add-method METHOD=…  # a second method, as a tab beside the first",
       "  npm run codegen           # after editing the method, or bumping its tag",
     ].join("\n"),

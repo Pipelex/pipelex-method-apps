@@ -24,7 +24,7 @@ node -p "require('./<template>/node_modules/@pipelex/mthds-form/package.json').v
 
 Then, once, the latest published version: `npm view @pipelex/mthds-form version`.
 
-- **`make local-status` reports a package as `local`**: the template is running a tarball packed from a workspace checkout, which a bump must not be measured against — and the version cannot show it, since a local build carries the published version string. `make use-npm-form` at the root restores the kernel the lockfile pins in every template, and refuses while the SDK is local too, in which case `make use-npm` restores both. Neither rewrites a manifest, so the baseline they give is the one this bump moves from.
+- **`make local-status` reports a package as `local`**: the template is running a tarball packed from a workspace checkout, which a bump must not be measured against — and the version cannot show it, since a local build carries the published version string. `make use-published-form` at the root restores the kernel the lockfile pins in every template, and refuses while the SDK is local too, in which case `make use-published` restores both. Neither rewrites a manifest, so the baseline they give is the one this bump moves from.
 - **The templates are on different versions**: they move to one version together here, and the lowest of them sets where the changelog reading in Step 3 starts.
 - **Every template is already on the latest**: say so and stop, unless the user named another version.
 

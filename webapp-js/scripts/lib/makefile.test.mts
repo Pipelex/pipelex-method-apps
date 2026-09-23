@@ -329,3 +329,48 @@ describe("where the servers listen", SPAWNS, () => {
     expect(warningSaid("run", ["APP_HOST=[::1]"])).toMatch(/^Warning: APP_HOST=\[::1\] opens/);
   });
 });
+
+describe("what make serve is handed", SPAWNS, () => {
+  /** The npm line `make serve <vars>` would run, with its spacing collapsed. */
+  function serveLine(vars: readonly string[], env: Record<string, string> = {}): string {
+    const { status, stdout, stderr } = make(["-n", "serve", ...vars], env);
+    expect(status, stderr).toBe(0);
+    const line = stdout.split("\n").find((printed) => printed.startsWith("npm run"));
+    expect(line, stdout).toBeDefined();
+    return line!.replace(/\s+/g, " ").trim();
+  }
+
+  it("fixes the port only when the command line or the shell gives one", () => {
+    // The Makefile's own default is not a request: serve walks from 4300.
+    expect(serveLine([])).toBe("npm run --silent serve -- serve --host '127.0.0.1'");
+    expect(serveLine(["APP_PORT=4305"])).toBe(
+      "npm run --silent serve -- serve --host '127.0.0.1' --port '4305'",
+    );
+    expect(serveLine([], { APP_PORT: "4306" })).toBe(
+      "npm run --silent serve -- serve --host '127.0.0.1' --port '4306'",
+    );
+  });
+
+  it("treats a blank port as not given", () => {
+    expect(serveLine(["APP_PORT="])).toBe("npm run --silent serve -- serve --host '127.0.0.1'");
+    expect(serveLine([], { APP_PORT: " " })).toBe(
+      "npm run --silent serve -- serve --host '127.0.0.1'",
+    );
+  });
+
+  it("hands the host over as set, for serve to refuse one beyond loopback", () => {
+    expect(serveLine(["APP_HOST=0.0.0.0"])).toBe(
+      "npm run --silent serve -- serve --host '0.0.0.0'",
+    );
+    expect(serveLine(["APP_HOST="])).toBe("npm run --silent serve -- serve --host '127.0.0.1'");
+    expect(serveLine([`APP_HOST=$(touch pwned) 'x'`, `APP_PORT=1'2`])).toBe(
+      `npm run --silent serve -- serve --host '$(touch pwned) '\\''x'\\''' --port '1'\\''2'`,
+    );
+  });
+
+  it("stops with nothing to hand over", () => {
+    const { status, stdout, stderr } = make(["-n", "stop", "APP_PORT=4305"]);
+    expect(status, stderr).toBe(0);
+    expect(stdout.trim()).toBe("npm run --silent serve -- stop");
+  });
+});

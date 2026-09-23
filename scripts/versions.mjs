@@ -4,15 +4,17 @@
  *
  * `VERSION` at the root is the family's version, and the release reads it.
  * Each template's own manifest carries a version too, because a project copied
- * out of the template keeps that manifest; this check holds each of them to
- * the root's number, so a release that bumps one and forgets another fails
- * before it merges.
+ * out of the template keeps that manifest, and each initializer publishes at
+ * the family's version, since it carries the templates of that release; this
+ * check holds each of them to the root's number, so a release that bumps one
+ * and forgets another fails before it merges.
  *
- *   node scripts/versions.mjs <template>...   exit 1 when a manifest disagrees
+ *   node scripts/versions.mjs <dir>...   exit 1 when a manifest disagrees
  *
- * A template's manifest is its `package.json`, or its `pyproject.toml`'s
- * `[project]` version. A template with neither is refused, since there would
- * be nothing to hold to the family's number.
+ * Each directory is a template or an initializer. Its manifest is its
+ * `package.json`, or its `pyproject.toml`'s `[project]` version. A directory
+ * with neither is refused, since there would be nothing to hold to the
+ * family's number.
  */
 
 import fs from "node:fs";
@@ -57,7 +59,7 @@ export function pyprojectVersion(text) {
 /** Where a template declares its version, and what it says. */
 export function templateVersion(root, template) {
   const dir = path.join(root, template);
-  if (!fs.existsSync(dir)) throw new VersionError(`${template}: no such template directory`);
+  if (!fs.existsSync(dir)) throw new VersionError(`${template}: no such directory`);
   const pkg = path.join(dir, "package.json");
   if (fs.existsSync(pkg)) {
     return {
@@ -88,13 +90,13 @@ export function mismatches(root, templates) {
 
 export function main(argv) {
   if (argv.length === 0) {
-    console.error("usage: node scripts/versions.mjs <template>...");
+    console.error("usage: node scripts/versions.mjs <template or initializer directory>...");
     return 2;
   }
   try {
     const { expected, wrong } = mismatches(ROOT, argv);
     if (wrong.length === 0) {
-      console.log(`Every template carries the family's version, ${expected}.`);
+      console.log(`Every template and initializer carries the family's version, ${expected}.`);
       return 0;
     }
     for (const { manifest, version } of wrong) {
