@@ -13,37 +13,9 @@ import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { EXTRAS, REQUIRED, SHARED, SWITCHES } from "./create-contract.mjs";
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
-/** What the scaffold skill may pass to any template's `make create`. */
-const SHARED = [
-  "METHOD",
-  "NAME",
-  "TITLE",
-  "DESCRIPTION",
-  "PIPE",
-  "AUTHOR_NAME",
-  "AUTHOR_EMAIL",
-  "REPO_URL",
-  "LICENSE",
-  "LICENSE_HOLDER",
-  "LICENSE_YEAR",
-  "DRY_RUN",
-];
-
-/** The variables that are switches: given as `1`, forwarded as a flag alone. */
-const SWITCHES = new Set(["DRY_RUN"]);
-
-/**
- * What a template's gesture takes beyond the shared set. The scaffold passes
- * one only to that template, in answer to a refusal that names it.
- */
-const EXTRAS = {
-  "webapp-js": ["METHOD_NAME", "LABEL"],
-};
-
-/** The required variable, forwarded in every run. */
-const REQUIRED = "METHOD";
 
 /** A value that shows whether it reached the gesture exactly as typed. */
 const valueOf = (name) => (SWITCHES.has(name) ? "1" : `${name} Bob's "$5" \`x\``);
@@ -199,7 +171,7 @@ describe("make create", () => {
       for (const name of recipeVariables(template)) {
         assert.ok(
           known.has(name),
-          `${template}'s create reads ${name}: add it to SHARED if the scaffold passes it to every template, or to EXTRAS["${template}"]`,
+          `${template}'s create reads ${name}: add it to SHARED in scripts/create-contract.mjs if the scaffold passes it to every template, or to EXTRAS["${template}"] there`,
         );
       }
     }

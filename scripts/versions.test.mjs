@@ -78,9 +78,12 @@ describe("pyprojectVersion", () => {
 });
 
 describe("this repository", () => {
-  it("carries one version across its templates", () => {
+  it("carries one version across its templates and its initializers", () => {
     const makefile = fs.readFileSync(path.join(ROOT, "Makefile"), "utf8");
-    const templates = /^TEMPLATES := (.+)$/m.exec(makefile)[1].trim().split(/\s+/);
-    assert.deepEqual(mismatches(ROOT, templates).wrong, []);
+    const list = (name) =>
+      new RegExp(`^${name} := (.+)$`, "m").exec(makefile)[1].trim().split(/\s+/);
+    const initializers = list("INITIALIZERS");
+    assert.ok(initializers.includes("initializers/js"));
+    assert.deepEqual(mismatches(ROOT, [...list("TEMPLATES"), ...initializers]).wrong, []);
   });
 });
