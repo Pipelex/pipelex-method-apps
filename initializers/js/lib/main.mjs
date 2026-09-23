@@ -12,7 +12,7 @@
  *     git's reading of the destination, and an identity when a commit will be
  *     made. Each failure is a `refused:` verdict naming the fix.
  *  2. **The write**, exclusive, removing what it created when it cannot finish.
- *  3. **Git**: `git init -b main` outside any work tree, then the pristine
+ *  3. **Git**: a new repository on `main` outside any work tree, then the pristine
  *     commit; the commit alone at the root of a repository with no commit yet;
  *     nothing inside another repository's work tree, or with `--no-git`.
  *  4. **`make create`**, unless `--no-create`, streamed or logged.
@@ -29,7 +29,7 @@ import process from "node:process";
 
 import { HELP_HINT, parseArgs, USAGE } from "./args.mjs";
 import { destinationProblem, nearestExisting, readDestination } from "./destination.mjs";
-import { commitPristine, hasIdentity, pristineMessage, readGit } from "./git.mjs";
+import { commitPristine, hasIdentity, pristineByHand, pristineMessage, readGit } from "./git.mjs";
 import { extractWarnings, makeArgs, runMake } from "./make.mjs";
 import { decodePack, PackError } from "./pack.mjs";
 import { loadTable, PACKAGE_ROOT } from "./templates.mjs";
@@ -294,7 +294,13 @@ async function create(argv, d, say, state) {
   if (git.commit) {
     const message = pristineMessage(pack);
     try {
-      const sha = commitPristine({ dest, init: git.init, message, env: d.env });
+      const sha = commitPristine({
+        dest,
+        init: git.init,
+        paths: pack.files.map((file) => file.path),
+        message,
+        env: d.env,
+      });
       gitLine = git.init
         ? `git: made a repository on main and committed the template as ${sha.slice(0, 12)}, "${message}".`
         : `git: committed the template as the repository's first commit, ${sha.slice(0, 12)}, "${message}".`;
@@ -302,7 +308,7 @@ async function create(argv, d, say, state) {
       for (const line of error.message.split("\n")) say(line);
       throw Verdict.failed(
         "commit",
-        `git refused the pristine commit (above). The copy stands in ${dest}: commit it with git -C ${shellQuote(dest)} add -A && git -C ${shellQuote(dest)} commit -m ${shellQuote(message)}, then run cd ${shellQuote(dest)} && ${nextCreate(table, template, values)}`,
+        `git refused the pristine commit (above). The copy stands in ${dest}: commit it with ${pristineByHand({ dest, init: git.init, message, quote: shellQuote })}, then run cd ${shellQuote(dest)} && ${nextCreate(table, template, values)}`,
       );
     }
   }

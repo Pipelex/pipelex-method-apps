@@ -218,10 +218,50 @@ describe("a run", () => {
     assert.ok(output.includes("a global hook said no"));
     assert.match(
       output.trimEnd().split("\n").at(-1),
-      /commit it with git -C .* add -A && git -C .* commit -m 'Start from .*', then run cd .* && make create METHOD=mt_1$/,
+      /commit it with git -C (\S+) init -q && git -C \1 symbolic-ref HEAD refs\/heads\/main && git -C \1 add --force -A && git -C \1 commit -m 'Start from .*', then run cd .* && make create METHOD=mt_1$/,
     );
     assert.ok(fs.existsSync(path.join(work, "app", "package.json")), "the copy stands");
     assert.equal(makeRecord(root), null, "make create did not run");
+  });
+
+  it("commits every file of the template, whatever git is told to ignore", async () => {
+    const { root, work } = workspace();
+    const env = runEnv(root);
+    const excludes = path.join(root, "global-excludes");
+    fs.writeFileSync(excludes, ".vscode/\n.claude/\npackage-lock.json\n");
+    fs.appendFileSync(env.GIT_CONFIG_GLOBAL, `[core]\n\texcludesFile = ${excludes}\n`);
+    const dest = path.join(work, "app");
+    fs.mkdirSync(dest);
+    git(dest, ["init", "-q"], env);
+    fs.writeFileSync(path.join(dest, ".git", "info", "exclude"), "*.md\n");
+
+    const { output, verdict } = await runInitializer(["app", "--no-create"], { cwd: work, env });
+    assert.equal(verdict, "copied", output);
+    const packed = decodePack(fs.readFileSync(path.join(packs(), "webapp-js.pack")))
+      .files.map((file) => file.path)
+      .sort();
+    assert.ok(packed.some((file) => file.startsWith(".claude/")), "the template carries .claude/");
+    assert.deepEqual(git(dest, ["ls-files"], env).split("\n").sort(), packed);
+    assert.equal(git(dest, ["status", "--porcelain", "--ignored"], env), "");
+  });
+
+  it("makes its repository on main with a git that predates init -b", async () => {
+    const { root, work } = workspace();
+    const env = runEnv(root);
+    const realGit = fs.realpathSync(path.join(env.PATH, "git"));
+    fs.rmSync(path.join(env.PATH, "git"));
+    fs.writeFileSync(
+      path.join(env.PATH, "git"),
+      `#!/bin/sh\nif [ "$1" = init ]; then for a in "$@"; do case "$a" in -b|--initial-branch*) echo "error: unknown switch 'b'" >&2; exit 129;; esac; done; fi\nexec '${realGit}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    fs.appendFileSync(env.GIT_CONFIG_GLOBAL, "[init]\n\tdefaultBranch = trunk\n");
+
+    const { output, verdict } = await runInitializer(["app", "--no-create"], { cwd: work, env });
+    assert.equal(verdict, "copied", output);
+    const dest = path.join(work, "app");
+    assert.equal(git(dest, ["symbolic-ref", "--short", "HEAD"], env), "main");
+    assert.equal(git(dest, ["rev-list", "--count", "HEAD"], env), "1");
   });
 
   it("names the copy and the next make create after --no-create", async () => {

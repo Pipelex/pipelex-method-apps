@@ -1,7 +1,7 @@
 /**
  * Git, read before anything is written, and one outcome for each case:
  *
- *   inside no work tree                    → `git init -b main`, then the pristine commit
+ *   inside no work tree                    → a new repository on main, then the pristine commit
  *   the root of a repository with no commit → the pristine commit, its first
  *   the root of a repository with history  → refused: repository-has-history
  *   inside another repository's work tree  → no repository and no commit
@@ -99,21 +99,47 @@ export function pristineMessage({ template, version, source }) {
 }
 
 /**
- * Initialize when asked, then make the pristine commit. Returns the commit's
- * SHA, or throws with git's own message. Git's output is not shown on success.
+ * Initialize when asked, then make the pristine commit of exactly `paths`, the
+ * files the write created. Returns the commit's SHA, or throws with git's own
+ * message. Git's output is not shown on success.
+ *
+ * The repository is born on `main` through `symbolic-ref` rather than
+ * `init -b`, which git before 2.28 does not know. The paths are added with
+ * `--force` and read literally: a user's `core.excludesFile` or the
+ * repository's `info/exclude` must not silently drop a file of the template
+ * from a commit that claims to hold it as it came, and the template ignores
+ * none of its own files.
  */
-export function commitPristine({ dest, init, message, env }) {
+export function commitPristine({ dest, init, paths, message, env }) {
   const steps = [
-    ...(init ? [["init", "-q", "-b", "main"]] : []),
-    ["add", "-A", "--", "."],
-    ["commit", "-q", "-m", message],
+    ...(init
+      ? [
+          ["init", ["init", "-q"]],
+          ["symbolic-ref", ["symbolic-ref", "HEAD", "refs/heads/main"]],
+        ]
+      : []),
+    ["add", ["--literal-pathspecs", "add", "--force", "--", ...paths]],
+    ["commit", ["commit", "-q", "-m", message]],
   ];
-  for (const args of steps) {
+  for (const [name, args] of steps) {
     const result = git(args, { cwd: dest, env });
     if (result.status !== 0) {
       const said = [result.stderr, result.stdout].filter(Boolean).join("\n");
-      throw new Error(`git ${args[0]} failed${said ? `:\n${said}` : ""}`);
+      throw new Error(`git ${name} failed${said ? `:\n${said}` : ""}`);
     }
   }
   return git(["rev-parse", "HEAD"], { cwd: dest, env }).stdout;
+}
+
+/**
+ * The commands a person runs to make the pristine commit by hand, once the
+ * copy stands, joined with `&&` for a shell. `quote` quotes one word.
+ */
+export function pristineByHand({ dest, init, message, quote }) {
+  const at = `git -C ${quote(dest)}`;
+  return [
+    ...(init ? [`${at} init -q`, `${at} symbolic-ref HEAD refs/heads/main`] : []),
+    `${at} add --force -A`,
+    `${at} commit -m ${quote(message)}`,
+  ].join(" && ");
 }

@@ -43,7 +43,7 @@ The initializer reads git before it writes anything:
 
 | The destination                                                                                  | What happens                                                                                                                     |
 | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| Inside no repository                                                                             | `git init -b main`, then the pristine commit                                                                                     |
+| Inside no repository                                                                             | A new repository on `main`, then the pristine commit                                                                             |
 | A repository with no commit yet (a `git init` by hand, or a clone of an empty GitHub repository) | The pristine commit, as its first                                                                                                |
 | A repository with commits, holding only `.git`                                                   | Refused: every tracked file would show as deleted, and the commit would record that                                              |
 | Inside another repository's work tree                                                            | No repository and no commit: the project is new files in that repository. `--no-create` lets you commit the template there first |
