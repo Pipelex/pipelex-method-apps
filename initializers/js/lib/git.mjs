@@ -112,22 +112,44 @@ export function hasIdentity({ cwd, env }) {
  * no `includeIf "gitdir:…"` section, so an identity given only to the
  * repositories under a directory is invisible from `from`. When that reading
  * finds none, the question is asked again inside a throwaway repository made
- * at `dest`, and the repository, with every directory made for it, is removed
- * before the answer is returned. A probe that cannot be made answers no.
+ * at `dest`, and what the probe made is removed before the answer is returned.
+ *
+ * It removes only what it made, as the write does. Each missing directory and
+ * the `.git` are made without `recursive`, so a path that stands there already,
+ * a dangling symlink the reading took for missing, or one another process
+ * creates meanwhile fails the probe instead of being taken over and removed.
+ * The directories go deepest first and only while empty, so what another
+ * process writes into one meanwhile stays. A probe that cannot be made
+ * answers no.
  */
 export function hasIdentityForInit({ dest, from, env }) {
   if (hasIdentity({ cwd: from, env })) return true;
+  const missing = [];
+  for (let at = dest; at !== from && path.dirname(at) !== at; at = path.dirname(at)) {
+    missing.unshift(at);
+  }
   const probe = path.join(dest, ".git");
-  if (fs.existsSync(probe)) return false;
-  const made =
-    from === dest ? probe : path.join(from, path.relative(from, dest).split(path.sep)[0]);
+  const made = [];
+  let probeMade = false;
   try {
-    fs.mkdirSync(dest, { recursive: true });
+    for (const dir of missing) {
+      fs.mkdirSync(dir);
+      made.push(dir);
+    }
+    fs.mkdirSync(probe);
+    probeMade = true;
     return git(["init", "-q"], { cwd: dest, env }).status === 0 && hasIdentity({ cwd: dest, env });
   } catch {
     return false;
   } finally {
-    fs.rmSync(made, { recursive: true, force: true });
+    if (probeMade) fs.rmSync(probe, { recursive: true, force: true });
+    for (const dir of made.reverse()) {
+      try {
+        fs.rmdirSync(dir);
+      } catch {
+        // Not empty: another process wrote into it, and what it wrote stays.
+      }
+    }
   }
 }
 

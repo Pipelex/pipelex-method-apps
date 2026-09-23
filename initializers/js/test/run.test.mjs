@@ -302,6 +302,46 @@ describe("a run", () => {
     assert.deepEqual(fs.readdirSync(work), []);
   });
 
+  it("leaves a dangling symlink where its identity probe would have made a directory", async () => {
+    for (const [link, typed] of [
+      ["app", "app"],
+      ["link", "link/app"],
+    ]) {
+      const { root, work } = workspace();
+      const target = path.join(root, "unmounted", link);
+      fs.symlinkSync(target, path.join(work, link));
+      const { output, verdict } = await runInitializer([typed, "--no-create"], {
+        cwd: work,
+        env: runEnv(root, { identity: false }),
+      });
+      assert.equal(verdict, "refused: no-git-identity", output);
+      assert.equal(fs.readlinkSync(path.join(work, link)), target);
+    }
+  });
+
+  it("keeps what another process writes into a directory its identity probe made", async () => {
+    const { root, work } = workspace();
+    const env = runEnv(root, { identity: false });
+    scopeIdentity(env, work);
+    // The probe's `git init` is the moment: a wrapper writes beside the
+    // destination, once, into the directory the probe has just made.
+    const gitPath = path.join(env.PATH, "git");
+    const realGit = fs.readlinkSync(gitPath);
+    fs.rmSync(gitPath);
+    fs.writeFileSync(
+      gitPath,
+      `#!/bin/sh\nif [ "$1" = init ] && [ ! -e "$RACE_MARK" ]; then : > "$RACE_MARK"; printf 'theirs\\n' > "$RACE_FILE"; fi\nexec "${realGit}" "$@"\n`,
+      { mode: 0o755 },
+    );
+    const theirs = path.join(work, "deep", "theirs.txt");
+    const { output, verdict } = await runInitializer(["deep/app", "--no-create"], {
+      cwd: work,
+      env: { ...env, RACE_MARK: path.join(root, "race-mark"), RACE_FILE: theirs },
+    });
+    assert.equal(verdict, "copied", output);
+    assert.equal(fs.readFileSync(theirs, "utf8"), "theirs\n");
+  });
+
   it("commits with an identity git gives only to the repositories under a directory", async () => {
     const { root, work } = workspace();
     const env = runEnv(root, { identity: false });
