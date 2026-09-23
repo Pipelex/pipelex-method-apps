@@ -261,6 +261,20 @@ async function run(
   return { code, lines, verdict: lines.at(-1) ?? "" };
 }
 
+/**
+ * An lsof that a signal kills, as a terminal's Ctrl-C or hangup would, when its
+ * arguments match `pattern`, a shell `case` pattern over them.
+ */
+function lsofKilledOn(pattern: string): string {
+  const lsof = path.join(tempDir("serve-lsof-"), "lsof");
+  writeFileSync(
+    lsof,
+    `#!/bin/sh\ncase " $* " in ${pattern}) kill -INT $$ ;; esac\nexec lsof "$@"\n`,
+  );
+  chmodSync(lsof, 0o755);
+  return lsof;
+}
+
 function stateOf(checkout: string): ServeState | undefined {
   const file = path.join(checkout, STATE_FILE);
   return existsSync(file) ? (JSON.parse(readFileSync(file, "utf-8")) as ServeState) : undefined;
@@ -375,6 +389,22 @@ describe("what is refused or answered before a server is looked for", () => {
     }
   });
 
+  it.skipIf(process.platform === "linux")(
+    "takes a ps killed by a signal for no answer, not for a process that has ended",
+    () => {
+      const dir = tempDir("serve-ps-");
+      writeFileSync(path.join(dir, "ps"), "#!/bin/sh\nkill -INT $$\n");
+      chmodSync(path.join(dir, "ps"), 0o755);
+      const search = process.env.PATH;
+      try {
+        process.env.PATH = `${dir}${path.delimiter}${search}`;
+        expect(() => startTimeOf(process.pid)).toThrow(/^SIGINT killed ps before it answered$/);
+      } finally {
+        process.env.PATH = search;
+      }
+    },
+  );
+
   it("says so when nothing was started", async () => {
     const checkout = checkoutWith();
     const result = await run(stop, configFor(checkout, "ok", []));
@@ -488,6 +518,21 @@ describe.skipIf(!HAS_LSOF)("make serve", SPAWNS, () => {
 
     await expect(serve(configFor(checkout, "ok", await freePorts(1), { lsof }))).rejects.toThrow(
       /EACCES/,
+    );
+    expect(pidsIn(checkout)).toHaveLength(2);
+    expect(await allGone(pidsIn(checkout))).toBe(true);
+    expect(stateOf(checkout)).toBeUndefined();
+    expect(existsSync(path.join(checkout, LOCK_FILE))).toBe(false);
+  });
+
+  it("stops what it started when a signal kills lsof during the start", async () => {
+    const checkout = checkoutWith();
+    // Killed once serve looks at the group's sockets, after the port opened.
+    const lsof = lsofKilledOn(`*" -g "*" -iTCP "*`);
+
+    const result = await run(serve, configFor(checkout, "ok", await freePorts(1), { lsof }));
+    expect(result.verdict).toBe(
+      "failed: interrupted — SIGINT arrived before the page was proven, so the server was stopped.",
     );
     expect(pidsIn(checkout)).toHaveLength(2);
     expect(await allGone(pidsIn(checkout))).toBe(true);
@@ -644,6 +689,30 @@ describe.skipIf(!HAS_LSOF)("make stop", SPAWNS, () => {
     );
     expect(alive(other.pid!)).toBe(true);
     expect(stateOf(checkout)).toBeUndefined();
+  });
+
+  it("keeps the record when a signal kills lsof before the group is known", async () => {
+    const checkout = checkoutWith();
+    const config = configFor(checkout, "ok", await freePorts(1));
+    const started = await run(serve, config);
+    expect(started.code, started.lines.join("\n")).toBe(0);
+    const recorded = stateOf(checkout);
+    // Killed once asked where the group runs, which is how its owner is known.
+    const killing = { ...config, lsof: lsofKilledOn(`*" -g "*" cwd "*`) };
+
+    for (const action of [stop, serve]) {
+      const result = await run(action, killing);
+      expect(result.verdict).toBe(
+        "failed: interrupted — SIGINT killed lsof before it answered, so nothing more was done " +
+          "and every running server was left as it was.",
+      );
+      expect(stateOf(checkout)).toEqual(recorded);
+      expect(pidsIn(checkout).every(alive)).toBe(true);
+    }
+
+    const stopped = await run(stop, config);
+    expect(stopped.verdict).toMatch(/^stopped /);
+    expect(await allGone(pidsIn(checkout))).toBe(true);
   });
 
   it("never signals a recorded group whose first process is another one, even here", async () => {

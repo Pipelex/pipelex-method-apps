@@ -57,6 +57,10 @@
  *
  * It needs `lsof`, and refuses without it rather than passing silently as
  * `port-check` does, since a proof that cannot check the listener is not one.
+ * An `lsof` or `ps` killed by a signal has not answered either: the terminal's
+ * Ctrl-C or hangup reaches them as it reaches serve, and their silence read as
+ * "nothing runs" would take a running server for gone and drop its record. So
+ * serve stops there, with the interruption as its verdict.
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -145,6 +149,15 @@ export interface ServeState {
 
 class NoLsofError extends Error {}
 
+/** An `lsof` or `ps` serve ran was killed by a signal, so it gave no answer. */
+class HelperKilledError extends Error {
+  readonly signal: NodeJS.Signals;
+  constructor(helper: string, signal: NodeJS.Signals) {
+    super(`${signal} killed ${helper} before it answered`);
+    this.signal = signal;
+  }
+}
+
 // ── Hosts and addresses ─────────────────────────────────────────────────────
 
 /**
@@ -196,6 +209,7 @@ function runLsof(lsof: string, args: readonly string[]): string {
     if ((result.error as NodeJS.ErrnoException).code === "ENOENT") throw new NoLsofError();
     throw result.error;
   }
+  if (result.signal !== null) throw new HelperKilledError("lsof", result.signal);
   // lsof exits 1 when nothing matched, which is an answer, not a failure.
   return result.stdout;
 }
@@ -210,6 +224,7 @@ export function lsofUsable(lsof: string): boolean {
   const result = spawnSync(lsof, ["-nP", "-a", "-p", String(process.pid), "-d", "cwd", "-Fp"], {
     encoding: "utf-8",
   });
+  if (result.signal !== null) throw new HelperKilledError("lsof", result.signal);
   return (
     result.error === undefined && (result.stdout ?? "").split("\n").includes(`p${process.pid}`)
   );
@@ -338,6 +353,7 @@ export function startTimeOf(pid: number): string | undefined {
     encoding: "utf-8",
     env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
   });
+  if (result.signal !== null) throw new HelperKilledError("ps", result.signal);
   const text = result.status === 0 ? result.stdout.trim() : "";
   return text === "" ? undefined : text;
 }
@@ -593,6 +609,16 @@ async function exclusive(
     }
     try {
       return await body(interrupt);
+    } catch (error) {
+      // Killed before a server was started, or while serve looked at the one it
+      // started earlier: nothing was changed on its silence. One killed during
+      // a start never reaches here, since `start` stops what it started.
+      if (!(error instanceof HelperKilledError)) throw error;
+      config.print(
+        `failed: interrupted — ${error.message}, so nothing more was done and every running ` +
+          "server was left as it was.",
+      );
+      return EXIT_FAILED;
     } finally {
       releaseLock(checkout, stamp);
     }
@@ -885,9 +911,9 @@ async function start(
     print(verdict);
     return EXIT_FAILED;
   };
-  const interruptedVerdict = () =>
-    `failed: interrupted — ${interrupt.received()} arrived before the page was proven, so the ` +
-    "server was stopped.";
+  const interruptedVerdict = (signal = interrupt.received()) =>
+    `failed: interrupted — ${signal} arrived before the page was proven, so the server was ` +
+    "stopped.";
 
   try {
     const leaderStart = startTimeOf(pgid);
@@ -962,6 +988,9 @@ async function start(
     settled = true;
     print(`serving ${describePage(url, page.title)} (log ${LOG_FILE}); stop it with: make stop`);
     return EXIT_OK;
+  } catch (error) {
+    if (!(error instanceof HelperKilledError)) throw error;
+    return await giveUp(interruptedVerdict(error.signal), false);
   } finally {
     if (!settled) {
       await stopGroup(pgid, config.graceMs);
