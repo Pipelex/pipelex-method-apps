@@ -291,8 +291,10 @@ A Next.js app that runs its methods through the [Pipelex](https://pipelex.com) A
 
 \`\`\`bash
 make install   # once
-make dev       # http://127.0.0.1:4300
+make dev       # http://127.0.0.1:4300, in this terminal
 \`\`\`
+
+\`make serve\` starts the same server in the background instead, prints its URL once the page answers, and \`make stop\` stops it.
 
 The app reads \`PIPELEX_API_KEY\` and \`PIPELEX_BASE_URL\` from \`.env.local\`; \`.env.example\` lists both.
 

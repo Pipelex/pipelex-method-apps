@@ -1,4 +1,4 @@
-.PHONY: help run dev build start port-check lint format format-check typecheck codegen codegen-check codegen-verify add-method test test-watch test-e2e test-e2e-ui confirm-live-e2e agent-test check clean install lock all use-local use-local-form use-published use-published-form local-status ul un
+.PHONY: help run dev serve stop build start port-check lint format format-check typecheck codegen codegen-check codegen-verify add-method test test-watch test-e2e test-e2e-ui confirm-live-e2e agent-test check clean install lock all use-local use-local-form use-published use-published-form local-status ul un
 
 # ── Arguments ──────────────────────────────────────────────────────────────
 # The gestures take their values as make variables (`make add-method
@@ -107,6 +107,30 @@ run: port-check ## Start the dev server on 127.0.0.1:4300 (APP_HOST=, APP_PORT= 
 	npm run dev
 
 dev: run ## Alias for run
+
+# `make serve` starts the same dev server in the background, detached from this
+# terminal and bound to loopback, waits for its port, checks that the listener
+# is the server it started and that it listens on this machine alone, proves
+# that the page answers, and prints the URL and the page's title. `make stop`
+# stops what it started. scripts/lib/serve.mts says why each check is there.
+#
+# Its verdict is its last line, opening with a stable word (`serving`,
+# `already-serving`, `refused: …`, `failed: …`; `stopped` or `not-running` for
+# stop). Running it twice gives one server and the same URL, and a server
+# started here with `make dev` is reported, never stopped.
+#
+# The port it tries is APP_PORT when the command line or the shell sets it, and
+# only that one; otherwise the first of 4300 to 4309 that no other directory
+# holds. `serve_port` is that given port, read from APP_PORT's origin: the
+# default this file sets is not a request. A non-loopback APP_HOST is refused —
+# widening the host stays `make dev APP_HOST=…`, in the foreground.
+serve_port = $(if $(filter-out file,$(origin APP_PORT)),$(strip $(value APP_PORT)))
+
+serve: ## Start the dev server in the background on loopback, prove the page answers, print its URL (make stop stops it)
+	@npm run --silent serve -- serve --host $(call shq,$(host_shown))$(if $(serve_port), --port $(call shq,$(serve_port)))
+
+stop: ## Stop the dev server make serve started
+	@npm run --silent serve -- stop
 
 build: ## Production build
 	npm run build
