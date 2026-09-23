@@ -56,7 +56,7 @@ The pristine commit reads `Start from Pipelex/pipelex-method-apps/webapp-js <ver
 
 ## What it prints
 
-A run ends with one verdict line, the last line of its output, whose first word is stable:
+A run ends with one verdict line, the last line it prints on standard output, whose first word is stable:
 
 | Verdict                                                                                                                                             | Meaning                                                                                                                                                                                                           |
 | --------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -71,6 +71,8 @@ A run ends with one verdict line, the last line of its output, whose first word 
 | `failed: create`                                                                                                                                    | `make create` did not succeed; the copy and its commit stand, and `make create`'s own message says what to run next: a refusal before it wrote anything can be fixed and run again, and a failure after it cannot |
 
 Before the verdict come the warnings `make create` printed, each once, and the git outcome. The exit code is 0 for `created` and `copied` and 1 otherwise, but the verdict is the line to read.
+
+Everything the initializer prints goes to standard output, `make create`'s output included when `--quiet` is not given. Under `npm create`, a run that exits 1 is followed by npm's own `npm error` lines on standard error, so read the verdict from standard output rather than from the last line of everything printed. `npm create --loglevel=silent @pipelex/method-app@latest …` removes npm's lines and leaves the initializer's alone.
 
 A Python template gets its own initializer, run with `uvx create-pipelex-method-app`, and this one refuses it with `refused: other-ecosystem`.
 
