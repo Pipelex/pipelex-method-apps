@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.4.0] - 2026-09-23
+
+### Highlights
+
+**A project starts with one command.** `npm create @pipelex/method-app` writes the web app template into a new directory and creates the app for the method it is given, and `make serve` then starts that app and proves that it answers. **This is the first release that publishes anything**: the initializer goes to npm, carrying the templates exactly as they stand at its version. The web app template also moves to `@pipelex/sdk` 0.19.0, and its `use-npm` targets are renamed `use-published`.
 
 ### Added
 
