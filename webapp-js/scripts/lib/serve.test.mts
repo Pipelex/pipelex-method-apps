@@ -30,6 +30,7 @@ import {
   isLoopbackAddress,
   isLoopbackHost,
   LOCK_FILE,
+  lsofUsable,
   parseServeArgs,
   serve,
   startTimeOf,
@@ -43,9 +44,10 @@ import {
 const SPAWNS = { timeout: 60_000 };
 
 // The cases that start a server read the real lsof. A slim Linux image may not
-// ship it, and `make all` must stay green there, so those cases are skipped
-// where it is missing; the refusal `make serve` gives there is tested anyway.
-const HAS_LSOF = spawnSync("lsof", ["-v"], { stdio: "ignore" }).error === undefined;
+// ship it, or ship BusyBox's under its name, and `make all` must stay green
+// there, so those cases are skipped where no usable lsof is found; the refusal
+// `make serve` gives there is tested anyway.
+const HAS_LSOF = lsofUsable("lsof");
 
 const TEMPLATE_DEV = "next dev -H ${APP_HOST:-127.0.0.1} -p ${APP_PORT:-4300}";
 
@@ -346,6 +348,31 @@ describe("what is refused or answered before a server is looked for", () => {
     );
     expect(result.verdict).toMatch(/^refused: no-lsof — /);
     expect(pidsIn(checkout)).toEqual([]);
+  });
+
+  it("refuses an lsof that does not take lsof's options, before starting anything", async () => {
+    const checkout = checkoutWith();
+    // As BusyBox's does: every option ignored, another format, exit 0.
+    const lsof = path.join(tempDir("serve-busybox-"), "lsof");
+    writeFileSync(lsof, '#!/bin/sh\necho "1\t/sbin/init\t0\t/dev/null"\n');
+    chmodSync(lsof, 0o755);
+    const result = await run(serve, configFor(checkout, "ok", await freePorts(1), { lsof }));
+    expect(result.verdict).toMatch(/^refused: no-lsof — .*BusyBox/);
+    expect(pidsIn(checkout)).toEqual([]);
+  });
+
+  it("reads a start time that does not depend on the shell's time zone", () => {
+    const zone = process.env.TZ;
+    try {
+      process.env.TZ = "UTC";
+      const utc = startTimeOf(process.pid);
+      process.env.TZ = "Asia/Tokyo";
+      expect(startTimeOf(process.pid)).toBe(utc);
+      expect(utc).toBeDefined();
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
   });
 
   it("says so when nothing was started", async () => {
@@ -691,20 +718,25 @@ describe.skipIf(!HAS_LSOF)("the command that started it", SPAWNS, () => {
     expect(await allGone(pidsIn(checkout))).toBe(true);
   });
 
-  it("stops what it started when it is interrupted", async () => {
-    const checkout = checkoutWith();
-    const started = serveInProcess(checkout, "slow", await freePorts(1), 30_000);
-    const deadline = Date.now() + 10_000;
-    while (!started.output().includes("starting the dev server") && Date.now() < deadline) {
-      await sleep(50);
-    }
-    expect(started.output()).toContain("starting the dev server");
-    started.child.kill("SIGINT");
+  it.each(["SIGINT", "SIGHUP"] as const)(
+    "stops what it started when %s interrupts it",
+    async (signal) => {
+      const checkout = checkoutWith();
+      const started = serveInProcess(checkout, "slow", await freePorts(1), 30_000);
+      const deadline = Date.now() + 10_000;
+      while (!started.output().includes("starting the dev server") && Date.now() < deadline) {
+        await sleep(50);
+      }
+      expect(started.output()).toContain("starting the dev server");
+      started.child.kill(signal);
 
-    expect(await started.exited).toBe(1);
-    expect(started.output().trimEnd().split("\n").at(-1)).toMatch(/^failed: interrupted — SIGINT/);
-    expect(pidsIn(checkout)).toHaveLength(2);
-    expect(await allGone(pidsIn(checkout))).toBe(true);
-    expect(stateOf(checkout)).toBeUndefined();
-  });
+      expect(await started.exited).toBe(1);
+      expect(started.output().trimEnd().split("\n").at(-1)).toMatch(
+        `failed: interrupted — ${signal}`,
+      );
+      expect(pidsIn(checkout)).toHaveLength(2);
+      expect(await allGone(pidsIn(checkout))).toBe(true);
+      expect(stateOf(checkout)).toBeUndefined();
+    },
+  );
 });

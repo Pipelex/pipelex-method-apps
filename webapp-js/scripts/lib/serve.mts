@@ -200,6 +200,25 @@ function runLsof(lsof: string, args: readonly string[]): string {
   return result.stdout;
 }
 
+/**
+ * Whether `lsof` is one serve can read: it runs, takes lsof's options, and
+ * finds this very process. BusyBox's, which slim images ship under the name,
+ * ignores every option and prints another format, so every question put to it
+ * would read as "nothing listens".
+ */
+export function lsofUsable(lsof: string): boolean {
+  const result = spawnSync(lsof, ["-nP", "-a", "-p", String(process.pid), "-d", "cwd", "-Fp"], {
+    encoding: "utf-8",
+  });
+  return (
+    result.error === undefined && (result.stdout ?? "").split("\n").includes(`p${process.pid}`)
+  );
+}
+
+function requireLsof(lsof: string): void {
+  if (!lsofUsable(lsof)) throw new NoLsofError();
+}
+
 /** Parse lsof's `-F` output into one record per file, carrying its process's fields. */
 function parseFields(output: string): Array<{ pid: number; pgid?: number; name: string }> {
   const files: Array<{ pid: number; pgid?: number; name: string }> = [];
@@ -293,7 +312,8 @@ function groupAlive(pgid: number): boolean {
  * the same id later, or `undefined` when it does not run. Linux keeps it in
  * `/proc`, in clock ticks since the boot, so the boot's id goes with it, and
  * this needs no `ps`, which a slim image may lack; elsewhere `ps` reads it, in
- * a locale fixed so that two shells agree on its spelling.
+ * a locale and a time zone fixed so that two shells agree on its spelling: it
+ * prints local time, and an agent's shell often sets `TZ=UTC`.
  */
 export function startTimeOf(pid: number): string | undefined {
   if (process.platform === "linux") {
@@ -316,7 +336,7 @@ export function startTimeOf(pid: number): string | undefined {
   }
   const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
     encoding: "utf-8",
-    env: { ...process.env, LC_ALL: "C" },
+    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
   });
   const text = result.status === 0 ? result.stdout.trim() : "";
   return text === "" ? undefined : text;
@@ -537,9 +557,11 @@ function releaseLock(checkout: string, stamp: string): void {
 }
 
 /**
- * Run `body` holding the lock, with SIGINT and SIGTERM turned into an
+ * Run `body` holding the lock, with SIGINT, SIGTERM and SIGHUP turned into an
  * interruption it answers: a run killed outright would leave the lock behind,
  * and one killed while it starts the server would leave an unproven server.
+ * SIGHUP is a terminal or a remote session closing while serve waits for the
+ * page, which can take minutes.
  */
 async function exclusive(
   config: ServeConfig,
@@ -552,8 +574,8 @@ async function exclusive(
     received = signal;
     controller.abort();
   };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
+  const signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const signal of signals) process.on(signal, onSignal);
   const interrupt: Interrupt = { signal: controller.signal, received: () => received };
   try {
     mkdirSync(path.join(checkout, SERVE_DIR), { recursive: true });
@@ -575,8 +597,7 @@ async function exclusive(
       releaseLock(checkout, stamp);
     }
   } finally {
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
+    for (const signal of signals) process.off(signal, onSignal);
   }
 }
 
@@ -642,7 +663,8 @@ export async function serve(config: ServeConfig): Promise<number> {
     if (error instanceof NoLsofError) {
       print(
         `refused: no-lsof — make serve reads who holds the port with lsof, and ${config.lsof} ` +
-          "is not on the PATH. Install lsof, or run make dev in the foreground.",
+          "is not on the PATH or does not take lsof's options, as BusyBox's does not. Install " +
+          "lsof, or run make dev in the foreground.",
       );
       return EXIT_FAILED;
     }
@@ -657,6 +679,7 @@ async function serveChecked(
   interrupt: Interrupt,
 ): Promise<number> {
   const { print, lsof } = config;
+  requireLsof(lsof);
 
   // The server serve started earlier, when it still runs here.
   const state = readState(checkout);
@@ -963,7 +986,8 @@ export async function stop(config: ServeConfig): Promise<number> {
     if (!(error instanceof NoLsofError)) throw error;
     print(
       "refused: no-lsof — make stop checks that the recorded process group still runs in this " +
-        `checkout before signalling it, and ${config.lsof} is not on the PATH.`,
+        `checkout before signalling it, and ${config.lsof} is not on the PATH or does not take ` +
+        "lsof's options, as BusyBox's does not.",
     );
     return EXIT_FAILED;
   }
@@ -976,6 +1000,7 @@ async function stopChecked(config: ServeConfig, checkout: string): Promise<numbe
     print("not-running — make serve has no server recorded in this checkout.");
     return EXIT_OK;
   }
+  requireLsof(config.lsof);
   const owner = ownership(config.lsof, state, checkout);
   removeState(checkout);
   if (owner === "gone") {
