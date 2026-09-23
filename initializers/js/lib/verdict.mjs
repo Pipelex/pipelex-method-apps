@@ -1,8 +1,10 @@
 /**
  * The verdicts. A run ends with one line whose first word is stable —
  * `created`, `copied`, `refused: <why>` or `failed: <what>` — and that line is
- * the last one printed, so a caller reads the verdict from the last line. The
- * exit code is presentation: 0 for `created` and `copied`, 1 otherwise.
+ * the last one printed. Everything goes to standard output, and a caller reads
+ * the verdict from its last line, because under `npm create` npm prints its own
+ * `npm error` lines on standard error after a run that exits 1. The exit code
+ * is presentation: 0 for `created` and `copied`, 1 otherwise.
  *
  *   created <dir>            the copy, the git outcome, and a green make create
  *   copied <dir>             --no-create or --dry-run: the copy and the git outcome only
