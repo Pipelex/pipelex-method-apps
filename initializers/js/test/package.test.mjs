@@ -30,14 +30,22 @@ function packageCopy() {
 describe("the package", () => {
   it("ships the bin, the library, the table and the packs, and nothing else", () => {
     const copy = packageCopy();
-    const [report] = JSON.parse(
-      execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
-        cwd: copy,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }),
-    );
-    const shipped = report.files.map((file) => file.path).sort();
+    // The tarball itself, listed by tar, rather than npm's report of it, whose
+    // shape changes between npm majors.
+    const destination = tempRoot("create-method-app-tarball-");
+    execFileSync("npm", ["pack", "--ignore-scripts", "--pack-destination", destination], {
+      cwd: copy,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const tarballs = fs.readdirSync(destination);
+    assert.equal(tarballs.length, 1, `npm pack wrote ${tarballs.join(", ")}`);
+    const shipped = execFileSync("tar", ["-tzf", path.join(destination, tarballs[0])], {
+      encoding: "utf8",
+    })
+      .split("\n")
+      .filter(Boolean)
+      .map((entry) => entry.replace(/^package\//, ""))
+      .sort();
     const expected = [
       "LICENSE",
       "README.md",

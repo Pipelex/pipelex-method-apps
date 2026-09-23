@@ -32,9 +32,11 @@ jobs:
           node-version: "22"
           registry-url: "https://registry.npmjs.org"
 
-      # npm trusted publishing needs a newer npm than Node 22 ships with.
+      # npm trusted publishing needs a newer npm than Node 22 ships with. The
+      # major is pinned, and family-check.yml installs the same one, so the
+      # release runs the npm every pull request ran: a new major is an edit.
       - name: Update npm for trusted publishing
-        run: npm install -g npm@latest
+        run: npm install -g npm@11
 
       - name: Read the version
         id: version
