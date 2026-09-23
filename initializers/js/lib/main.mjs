@@ -29,7 +29,14 @@ import process from "node:process";
 
 import { HELP_HINT, parseArgs, USAGE } from "./args.mjs";
 import { destinationProblem, nearestExisting, readDestination } from "./destination.mjs";
-import { commitPristine, hasIdentity, pristineByHand, pristineMessage, readGit } from "./git.mjs";
+import {
+  commitPristine,
+  hasIdentity,
+  pristineByHand,
+  pristineMessage,
+  readGit,
+  templateOrigin,
+} from "./git.mjs";
 import { extractWarnings, makeArgs, runMake } from "./make.mjs";
 import { decodePack, PackError } from "./pack.mjs";
 import { loadTable, PACKAGE_ROOT } from "./templates.mjs";
@@ -121,7 +128,7 @@ export function resolveDeps(deps = {}) {
 /** Choose the template, refusing one this initializer does not serve and an option it does not take. */
 function chooseTemplate(args, table) {
   const template = args.template ?? table.defaultTemplate;
-  if (!(template in table.templates)) {
+  if (!Object.hasOwn(table.templates, template)) {
     const other = table.otherEcosystemOf(template);
     if (other !== null) {
       throw Verdict.refused(
@@ -146,15 +153,27 @@ function chooseTemplate(args, table) {
   return template;
 }
 
+function insideTemplateCheckout(dest, origin) {
+  return Verdict.refused(
+    "inside-template-checkout",
+    `${dest} is inside a checkout of ${origin}, a template's own repository, not a place for a project: choose a directory outside it`,
+  );
+}
+
 /** The preflight's git reading, as the plan the write follows. */
 function planGit(args, dest, found, env) {
-  if (args.noGit)
+  const from = found.kind === "missing" ? nearestExisting(dest) : dest;
+  if (args.noGit) {
+    // --no-git makes no repository, but a template's own checkout is no place
+    // for a project either way, so it is refused whenever git can read it.
+    const origin = onPath("git", env) ? templateOrigin({ from, env }) : null;
+    if (origin !== null) throw insideTemplateCheckout(dest, origin);
     return {
       commit: false,
       init: false,
       line: "git: --no-git, so nothing was initialized or committed.",
     };
-  const from = found.kind === "missing" ? nearestExisting(dest) : dest;
+  }
   const reading = readGit({
     dest,
     from,
@@ -165,10 +184,7 @@ function planGit(args, dest, found, env) {
   let plan;
   switch (reading.kind) {
     case "template-checkout":
-      throw Verdict.refused(
-        "inside-template-checkout",
-        `${dest} is inside a checkout of ${reading.origin}, a template's own repository, not a place for a project: choose a directory outside it`,
-      );
+      throw insideTemplateCheckout(dest, reading.origin);
     case "unreadable-git":
       throw Verdict.refused(
         "not-empty",
@@ -251,7 +267,18 @@ async function create(argv, d, say, state) {
   }
 
   const dest = path.resolve(d.cwd, args.dir);
-  const found = readDestination(dest);
+  let found;
+  try {
+    found = readDestination(dest);
+  } catch (error) {
+    // A file where a directory of the path should be, or a directory that
+    // cannot be read: the preflight stops here, and nothing was written.
+    if (typeof error?.code !== "string") throw error;
+    throw Verdict.refused(
+      "unusable-destination",
+      `${dest} cannot be read (${error.message}): choose a directory whose path is made of directories you can read`,
+    );
+  }
   const problem = destinationProblem(dest, found);
   if (problem !== null) throw Verdict.refused("not-empty", problem);
   const git = planGit(args, dest, found, d.env);

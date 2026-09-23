@@ -75,6 +75,9 @@ function destination(dest, kind, env) {
       fs.mkdirSync(dest);
       fs.writeFileSync(path.join(dest, "notes.txt"), "mine\n");
       return;
+    case "beneath-a-file":
+      fs.writeFileSync(path.dirname(dest), "mine\n");
+      return;
     default:
       throw new Error(`cases.json: unknown destination ${kind}`);
   }
@@ -107,7 +110,8 @@ describe("initializers/cases.json", () => {
       const root = tempRoot("create-method-app-case-");
       const env = setupEnv(root);
       const { parent, repo } = within(root, c.within);
-      const name = c.spelled === "space" ? "my app" : "my-app";
+      const leaf = c.spelled === "space" ? "my app" : "my-app";
+      const name = c.destination === "beneath-a-file" ? `notes.txt/${leaf}` : leaf;
       const dest = path.join(parent, name);
       destination(dest, c.destination, env);
       const before = snapshot(dest, env);

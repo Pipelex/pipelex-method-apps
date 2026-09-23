@@ -4,6 +4,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import process from "node:process";
 import { describe, it } from "node:test";
 
 import { decodePack } from "../lib/pack.mjs";
@@ -240,7 +241,10 @@ describe("a run", () => {
     const packed = decodePack(fs.readFileSync(path.join(packs(), "webapp-js.pack")))
       .files.map((file) => file.path)
       .sort();
-    assert.ok(packed.some((file) => file.startsWith(".claude/")), "the template carries .claude/");
+    assert.ok(
+      packed.some((file) => file.startsWith(".claude/")),
+      "the template carries .claude/",
+    );
     assert.deepEqual(git(dest, ["ls-files"], env).split("\n").sort(), packed);
     assert.equal(git(dest, ["status", "--porcelain", "--ignored"], env), "");
   });
@@ -295,6 +299,42 @@ describe("a run", () => {
     );
     assert.equal(fs.existsSync(path.join(work, "app")), false);
   });
+
+  it("reads no template or ecosystem from what every object inherits", async () => {
+    const { root, work } = workspace();
+    for (const template of ["toString", "__proto__", "foo-constructor"]) {
+      const { output, verdict } = await runInitializer(
+        ["app", "--method", "mt_1", "--template", template],
+        { cwd: work, env: runEnv(root) },
+      );
+      assert.equal(verdict, "refused: unknown-template", output);
+      assert.ok(!output.includes("native code"), output);
+    }
+    assert.deepEqual(fs.readdirSync(work), []);
+  });
+
+  it(
+    "refuses a destination beneath a directory it cannot read, writing nothing",
+    {
+      skip: process.getuid?.() === 0 && "root reads every directory",
+    },
+    async () => {
+      const { root, work } = workspace();
+      const locked = path.join(work, "locked");
+      fs.mkdirSync(locked, { mode: 0o000 });
+      try {
+        const { output, verdict } = await runInitializer(["locked/app", "--method", "mt_1"], {
+          cwd: work,
+          env: runEnv(root),
+        });
+        assert.equal(verdict, "refused: unusable-destination", output);
+      } finally {
+        fs.chmodSync(locked, 0o755);
+      }
+      assert.deepEqual(fs.readdirSync(locked), []);
+      assert.equal(makeRecord(root), null);
+    },
+  );
 
   it("ends in failed: write, having removed what it created, when interrupted", async () => {
     const { root, work } = workspace();

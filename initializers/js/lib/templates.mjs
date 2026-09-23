@@ -54,7 +54,7 @@ export function loadTable(file = TABLE_FILE) {
     otherEcosystemOf(template) {
       const language = /-([a-z0-9]+)$/.exec(template)?.[1];
       if (language === undefined || language === raw.ecosystem) return null;
-      return raw.otherEcosystems[language] ?? null;
+      return Object.hasOwn(raw.otherEcosystems, language) ? raw.otherEcosystems[language] : null;
     },
   };
 }

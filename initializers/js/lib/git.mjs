@@ -67,10 +67,8 @@ export function readGit({ dest, from, destExists, destHasGit, env }) {
   const top = git(["rev-parse", "--show-toplevel"], { cwd: from, env });
   if (top.status !== 0) return destHasGit ? { kind: "unreadable-git" } : { kind: "outside" };
 
-  const origin = git(["remote", "get-url", "origin"], { cwd: from, env });
-  if (origin.status === 0 && TEMPLATE_ORIGINS.test(origin.stdout)) {
-    return { kind: "template-checkout", origin: origin.stdout };
-  }
+  const origin = templateOrigin({ from, env });
+  if (origin !== null) return { kind: "template-checkout", origin };
 
   // `--show-prefix` prints nothing at a repository's root, which needs no path
   // comparison and so survives symlinks and letter case.
@@ -83,6 +81,12 @@ export function readGit({ dest, from, destExists, destHasGit, env }) {
     if (destHasGit) return { kind: "unreadable-git" };
   }
   return { kind: "inside", toplevel: top.stdout };
+}
+
+/** The `origin` of the repository `from` stands in when it is a template's own, or null. */
+export function templateOrigin({ from, env }) {
+  const origin = git(["remote", "get-url", "origin"], { cwd: from, env });
+  return origin.status === 0 && TEMPLATE_ORIGINS.test(origin.stdout) ? origin.stdout : null;
 }
 
 /** Whether git can name an author and a committer, as a commit needs. */
