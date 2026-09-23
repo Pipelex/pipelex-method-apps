@@ -12,33 +12,44 @@
  *
  *   serving, already-serving                     the page answered
  *   refused: not-loopback, refused: port-held,   nothing was started
- *   refused: no-lsof, refused: bad-port
+ *   refused: no-lsof, refused: bad-port,
+ *   refused: busy
  *   failed: not-listening, failed: exited,       what was started is stopped
  *   failed: page <status>, failed: interrupted
  *   stopped, not-running                         make stop
  *
- * Four rules make the verdict true rather than hopeful:
+ * These rules make the verdict true rather than hopeful:
  *
  *  - **Loopback, before and after.** The app's Server Actions run methods with
  *    the key in the server's environment and nothing authenticates the browser
  *    calling them, so a server anyone on the network can reach spends the key
  *    for them from the moment its port opens. A host that is not loopback is
  *    refused before anything starts, and so is a `dev` script that does not bind
- *    the host it is given. Once the port opens, every socket the server listens
- *    on must be loopback, or it is stopped.
+ *    the host it is given. Once the port opens, every socket the server's
+ *    process group listens on, whatever its port, must be loopback, or the
+ *    group is stopped.
  *  - **A process group of its own.** The server is spawned in a new session, so
  *    the terminal's hangup does not reach it, and everything it starts shares
  *    its group. Stopping is one signal to the group, then a hard stop after a
- *    grace period. `.serve/state.json` records the group, and `make stop`
- *    signals it only while one of its processes still runs in this checkout,
- *    so a recycled process id is never signalled.
+ *    grace period.
+ *  - **A recorded group is signalled only while it is provably serve's.**
+ *    `.serve/state.json` records the group and when its first process started.
+ *    A process id is reused once its process ends, so the group is taken for
+ *    the one serve started only while that first process, if it still runs,
+ *    started when the record says, and one of the group's processes runs in
+ *    this checkout: a stale record whose id now names a shell, an editor or the
+ *    very `make` running the command is never signalled.
+ *  - **One run at a time.** A serve or a stop holds `.serve/lock` from its first
+ *    look at the state to its verdict, so two never undo each other. One that
+ *    finds it held waits, and a second `make serve` then reports the server the
+ *    first one proved.
  *  - **The holder is known by its group.** A listener on the port belongs to the
  *    server serve started when it is in that group; a path is compared only to
  *    recognise a server a person started from this checkout, and then against
  *    the checkout's real path, in the letter case the disk has.
  *  - **Nothing unproven is left running.** A server whose port does not open in
  *    time, that exits, whose page does not answer `200`, or whose start is
- *    interrupted, is stopped with every process under it.
+ *    interrupted or broken by an error, is stopped with every process under it.
  *
  * Serve never stops what it did not start: a server a person started from this
  * checkout is reported and left alone, and a port another directory holds is
@@ -47,7 +58,8 @@
  * It needs `lsof`, and refuses without it rather than passing silently as
  * `port-check` does, since a proof that cannot check the listener is not one.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   closeSync,
   existsSync,
@@ -76,6 +88,8 @@ export const EXIT_USAGE = 2;
 export const SERVE_DIR = ".serve";
 export const STATE_FILE = path.join(SERVE_DIR, "state.json");
 export const LOG_FILE = path.join(SERVE_DIR, "server.log");
+/** Held while a serve or a stop runs, so that two never interleave in one checkout. */
+export const LOCK_FILE = path.join(SERVE_DIR, "lock");
 
 /** The ports tried in turn when none is given, as `next dev` and Vite walk theirs. */
 export const DEFAULT_PORTS: readonly number[] = Array.from({ length: 10 }, (_, i) => 4300 + i);
@@ -120,6 +134,8 @@ export const DEFAULT_CONFIG: ServeConfig = {
 /** What `.serve/state.json` records about the server serve started. */
 export interface ServeState {
   pgid: number;
+  /** When the group's first process started, as `startTimeOf` reads it. */
+  leaderStart: string;
   port: number;
   url: string;
   log: string;
@@ -207,15 +223,36 @@ function parseFields(output: string): Array<{ pid: number; pgid?: number; name: 
   return files;
 }
 
-/** Every socket listening on one of `ports`. */
-export function readListeners(lsof: string, ports: readonly number[]): Listener[] {
-  const output = runLsof(lsof, ["-nP", `-iTCP:${ports.join(",")}`, "-sTCP:LISTEN", "-Fpgn"]);
+/** Parse lsof's socket records into listeners, keeping only `ports` when given. */
+function parseListeners(output: string, ports?: readonly number[]): Listener[] {
   return parseFields(output).flatMap(({ pid, pgid, name }) => {
     const colon = name.lastIndexOf(":");
     const port = Number(name.slice(colon + 1));
-    if (colon < 0 || !ports.includes(port)) return [];
+    if (colon < 0 || !Number.isInteger(port)) return [];
+    if (ports !== undefined && !ports.includes(port)) return [];
     return [{ pid, pgid: pgid ?? -1, port, address: name.slice(0, colon) }];
   });
+}
+
+/** Every socket listening on one of `ports`. */
+export function readListeners(lsof: string, ports: readonly number[]): Listener[] {
+  const output = runLsof(lsof, ["-nP", `-iTCP:${ports.join(",")}`, "-sTCP:LISTEN", "-Fpgn"]);
+  return parseListeners(output, ports);
+}
+
+/** Every TCP socket a process group listens on, whatever its port. */
+export function groupListeners(lsof: string, pgid: number): Listener[] {
+  const output = runLsof(lsof, ["-nP", "-a", "-g", String(pgid), "-iTCP", "-sTCP:LISTEN", "-Fpgn"]);
+  return parseListeners(output);
+}
+
+/** The sockets among `sockets` that listen beyond this machine. */
+function beyond(sockets: readonly Listener[]): Listener[] {
+  return sockets.filter((listener) => !isLoopbackAddress(listener.address));
+}
+
+function addressesOf(sockets: readonly Listener[]): string {
+  return sockets.map((listener) => `${listener.address}:${listener.port}`).join(", ");
 }
 
 /** The working directory of a process, as the system reports it. */
@@ -232,14 +269,57 @@ function groupCwds(lsof: string, pgid: number): string[] {
 
 // ── The process group ───────────────────────────────────────────────────────
 
-function groupAlive(pgid: number): boolean {
+/** Whether a process exists, or with a negative id, a process group. */
+function exists(id: number): boolean {
   try {
-    process.kill(-pgid, 0);
+    process.kill(id, 0);
     return true;
   } catch (error) {
-    // EPERM means a process of the group exists but is not ours to signal.
+    // EPERM means it exists but is not ours to signal.
     return (error as NodeJS.ErrnoException).code === "EPERM";
   }
+}
+
+function processAlive(pid: number): boolean {
+  return exists(pid);
+}
+
+function groupAlive(pgid: number): boolean {
+  return exists(-pgid);
+}
+
+/**
+ * When a process started, as a string that differs for another process given
+ * the same id later, or `undefined` when it does not run. Linux keeps it in
+ * `/proc`, in clock ticks since the boot, so the boot's id goes with it, and
+ * this needs no `ps`, which a slim image may lack; elsewhere `ps` reads it, in
+ * a locale fixed so that two shells agree on its spelling.
+ */
+export function startTimeOf(pid: number): string | undefined {
+  if (process.platform === "linux") {
+    let stat: string;
+    try {
+      stat = readFileSync(`/proc/${pid}/stat`, "utf-8");
+    } catch {
+      return undefined;
+    }
+    // The command's name, in parentheses, may hold spaces, so the fields are
+    // counted after it: the state is the third, the start time the 22nd.
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    let boot = "";
+    try {
+      boot = readFileSync("/proc/sys/kernel/random/boot_id", "utf-8").trim();
+    } catch {
+      // The ticks alone, then.
+    }
+    return `${boot}:${fields[19]}`;
+  }
+  const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+    encoding: "utf-8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  const text = result.status === 0 ? result.stdout.trim() : "";
+  return text === "" ? undefined : text;
 }
 
 function signalGroup(pgid: number, signal: NodeJS.Signals): void {
@@ -267,7 +347,9 @@ export async function stopGroup(pgid: number, graceMs: number): Promise<void> {
 function readState(checkout: string): ServeState | undefined {
   try {
     const state = JSON.parse(readFileSync(path.join(checkout, STATE_FILE), "utf-8")) as ServeState;
-    return Number.isInteger(state.pgid) && state.pgid > 1 ? state : undefined;
+    return Number.isInteger(state.pgid) && state.pgid > 1 && typeof state.leaderStart === "string"
+      ? state
+      : undefined;
   } catch {
     return undefined;
   }
@@ -285,11 +367,16 @@ function removeState(checkout: string): void {
 
 /**
  * Whether the group a state file names is still serve's server in this
- * checkout: `gone` when no process of it runs, `foreign` when its processes run
- * elsewhere, which is a recycled id or a checkout copied with its `.serve/`.
+ * checkout: `gone` when no process of it runs, `foreign` when its id now names
+ * another group, or when its processes run elsewhere, as in a checkout copied
+ * with its `.serve/`.
  */
 function ownership(lsof: string, state: ServeState, checkout: string): "ours" | "gone" | "foreign" {
   if (!groupAlive(state.pgid)) return "gone";
+  // A group's id is its first process's. While that process runs it must be
+  // the one serve started; once it has ended, the id is not given to another
+  // process until the whole group has ended too, so the group is still serve's.
+  if (processAlive(state.pgid) && startTimeOf(state.pgid) !== state.leaderStart) return "foreign";
   const cwds = groupCwds(lsof, state.pgid);
   if (cwds.length === 0) return "gone";
   return cwds.includes(checkout) ? "ours" : "foreign";
@@ -364,6 +451,135 @@ function printLogTail(config: ServeConfig, log: string, lines = 20): void {
   for (const line of tail) config.print(`  ${line}`);
 }
 
+// ── One run at a time ───────────────────────────────────────────────────────
+
+/** A signal that arrived while a run was going, which it answers with a verdict rather than dying. */
+interface Interrupt {
+  signal: AbortSignal;
+  received: () => NodeJS.Signals | undefined;
+}
+
+class BusyError extends Error {}
+
+function readOr(file: string, fallback: string): string {
+  try {
+    return readFileSync(file, "utf-8");
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Take the checkout's lock, waiting while another run holds it.
+ *
+ * Two runs at once undo each other: both find no server and start one on the
+ * same port, and the one that fails removes the state of the one that serves;
+ * or one stops the other's server while it is still starting. So a run takes
+ * `.serve/lock`, created exclusively and holding its pid, and one that finds it
+ * held waits for as long as a whole start can take. The lock is removed only by
+ * the run that made it. One left behind by a run that was killed is never
+ * broken on its own, as in `make add-method`: two runs breaking it at once would
+ * each believe they held it, so the refusal names the file instead. Returns
+ * `undefined` when an interruption ends the wait.
+ */
+async function takeLock(
+  config: ServeConfig,
+  checkout: string,
+  interrupt: Interrupt,
+): Promise<string | undefined> {
+  const file = path.join(checkout, LOCK_FILE);
+  const stamp = `${process.pid}\n${randomUUID()}\n`;
+  const deadline = Date.now() + config.waitMs + config.pageMs + 2 * config.graceMs + 5_000;
+  let announced = false;
+  for (;;) {
+    try {
+      writeFileSync(file, stamp, { flag: "wx" });
+      return stamp;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    // Empty or gone: the file is created before its pid is written, and removed
+    // when its run ends, so another run is taking or releasing it.
+    const pid = Number(readOr(file, "").split("\n")[0]);
+    const known = Number.isSafeInteger(pid) && pid > 0;
+    if (known && !processAlive(pid)) {
+      throw new BusyError(
+        `refused: busy — ${LOCK_FILE} is held by pid ${pid}, which is no longer running, so a ` +
+          "make serve or make stop was killed before it could remove it. Nothing was done: if " +
+          `no other one is running in this checkout, remove ${LOCK_FILE} and run again.`,
+      );
+    }
+    if (Date.now() >= deadline) {
+      throw new BusyError(
+        known
+          ? `refused: busy — pid ${pid} has held ${LOCK_FILE} for longer than a make serve takes. ` +
+              `Nothing was done. If pid ${pid} is not a make serve or make stop, one that was ` +
+              `killed left the file behind and its pid has been reused: remove ${LOCK_FILE} and ` +
+              "run again."
+          : `refused: busy — ${LOCK_FILE} has stayed empty for longer than a make serve takes, so ` +
+              `a run was killed as it took it. Nothing was done: remove ${LOCK_FILE} and run again.`,
+      );
+    }
+    if (known && !announced) {
+      config.print(
+        `waiting for another make serve or make stop (pid ${pid}) to finish in this checkout`,
+      );
+      announced = true;
+    }
+    if (interrupt.received()) return undefined;
+    await sleep(200);
+  }
+}
+
+function releaseLock(checkout: string, stamp: string): void {
+  const file = path.join(checkout, LOCK_FILE);
+  if (readOr(file, "") === stamp) rmSync(file, { force: true });
+}
+
+/**
+ * Run `body` holding the lock, with SIGINT and SIGTERM turned into an
+ * interruption it answers: a run killed outright would leave the lock behind,
+ * and one killed while it starts the server would leave an unproven server.
+ */
+async function exclusive(
+  config: ServeConfig,
+  checkout: string,
+  body: (interrupt: Interrupt) => Promise<number>,
+): Promise<number> {
+  let received: NodeJS.Signals | undefined;
+  const controller = new AbortController();
+  const onSignal = (signal: NodeJS.Signals) => {
+    received = signal;
+    controller.abort();
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  const interrupt: Interrupt = { signal: controller.signal, received: () => received };
+  try {
+    mkdirSync(path.join(checkout, SERVE_DIR), { recursive: true });
+    let stamp: string | undefined;
+    try {
+      stamp = await takeLock(config, checkout, interrupt);
+    } catch (error) {
+      if (!(error instanceof BusyError)) throw error;
+      config.print(error.message);
+      return EXIT_FAILED;
+    }
+    if (stamp === undefined) {
+      config.print(`failed: interrupted — ${received} arrived before anything was done.`);
+      return EXIT_FAILED;
+    }
+    try {
+      return await body(interrupt);
+    } finally {
+      releaseLock(checkout, stamp);
+    }
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
+}
+
 // ── serve ───────────────────────────────────────────────────────────────────
 
 function readDevScript(checkout: string): string {
@@ -419,7 +635,9 @@ export async function serve(config: ServeConfig): Promise<number> {
   }
 
   try {
-    return await serveChecked(config, checkout, host);
+    return await exclusive(config, checkout, (interrupt) =>
+      serveChecked(config, checkout, host, interrupt),
+    );
   } catch (error) {
     if (error instanceof NoLsofError) {
       print(
@@ -432,7 +650,12 @@ export async function serve(config: ServeConfig): Promise<number> {
   }
 }
 
-async function serveChecked(config: ServeConfig, checkout: string, host: string): Promise<number> {
+async function serveChecked(
+  config: ServeConfig,
+  checkout: string,
+  host: string,
+  interrupt: Interrupt,
+): Promise<number> {
   const { print, lsof } = config;
 
   // The server serve started earlier, when it still runs here.
@@ -443,7 +666,9 @@ async function serveChecked(config: ServeConfig, checkout: string, host: string)
       const listening = readListeners(lsof, [state.port]).filter(
         (listener) => listener.pgid === state.pgid,
       );
-      if (listening.length > 0) return reportOwnServer(config, checkout, state, listening);
+      if (listening.length > 0) {
+        return reportOwnServer(config, checkout, state, listening, interrupt);
+      }
       // Ours, but not listening: a start that never finished. It proves
       // nothing, so it goes before a fresh one starts.
       print(
@@ -468,7 +693,7 @@ async function serveChecked(config: ServeConfig, checkout: string, host: string)
     const sockets = listeners.filter(
       (listener) => listener.pid === personal.pid && listener.port === personal.port,
     );
-    return reportPersonalServer(config, personal, sockets);
+    return reportPersonalServer(config, personal, sockets, interrupt);
   }
 
   let port: number;
@@ -497,7 +722,7 @@ async function serveChecked(config: ServeConfig, checkout: string, host: string)
     port = free;
   }
 
-  return start(config, checkout, host, port);
+  return start(config, checkout, host, port, interrupt);
 }
 
 async function reportOwnServer(
@@ -505,19 +730,33 @@ async function reportOwnServer(
   checkout: string,
   state: ServeState,
   listening: readonly Listener[],
+  interrupt: Interrupt,
 ): Promise<number> {
   const { print } = config;
-  if (!listening.every((listener) => isLoopbackAddress(listener.address))) {
+  const wide = beyond(groupListeners(config.lsof, state.pgid));
+  if (wide.length > 0) {
     await stopGroup(state.pgid, config.graceMs);
     removeState(checkout);
     print(
       `refused: not-loopback — the server make serve started listened beyond this machine ` +
-        `(${listening.map((l) => l.address).join(", ")}), so it was stopped.`,
+        `(${addressesOf(wide)}), so it was stopped.`,
     );
     return EXIT_FAILED;
   }
   const url = urlOf(loopbackAddressOf(listening), state.port);
-  const page = await requestPage(url, config.pageMs, () => groupAlive(state.pgid));
+  const page = await requestPage(
+    url,
+    config.pageMs,
+    () => groupAlive(state.pgid),
+    interrupt.signal,
+  );
+  if (page.status === "interrupted") {
+    print(
+      `failed: interrupted — ${interrupt.received()} arrived before ${url} answered; the server ` +
+        "make serve started earlier is still running.",
+    );
+    return EXIT_FAILED;
+  }
   if (page.status !== 200) {
     await stopGroup(state.pgid, config.graceMs);
     removeState(checkout);
@@ -537,6 +776,7 @@ async function reportPersonalServer(
   config: ServeConfig,
   personal: Listener,
   sockets: readonly Listener[],
+  interrupt: Interrupt,
 ): Promise<number> {
   const { print } = config;
   const where = `pid ${personal.pid}, started outside make serve`;
@@ -549,7 +789,14 @@ async function reportPersonalServer(
     return EXIT_FAILED;
   }
   const url = urlOf(loopbackAddressOf(sockets), personal.port);
-  const page = await requestPage(url, config.pageMs, () => true);
+  const page = await requestPage(url, config.pageMs, () => true, interrupt.signal);
+  if (page.status === "interrupted") {
+    print(
+      `failed: interrupted — ${interrupt.received()} arrived before ${url} answered; this ` +
+        `checkout's server (${where}) is still running.`,
+    );
+    return EXIT_FAILED;
+  }
   if (page.status !== 200) {
     print(
       `failed: page ${page.status} — this checkout's server on ${url} (${where}) did not answer ` +
@@ -567,22 +814,26 @@ async function start(
   checkout: string,
   host: string,
   port: number,
+  interrupt: Interrupt,
 ): Promise<number> {
   const { print, lsof } = config;
   const log = path.join(checkout, LOG_FILE);
-  mkdirSync(path.join(checkout, SERVE_DIR), { recursive: true });
   const output = openSync(log, "w");
 
   const [command, ...args] = config.command;
-  const child = spawn(command, args, {
-    cwd: checkout,
-    // A new session: a group of its own for one signal to stop, and out of
-    // reach of the terminal's hangup.
-    detached: true,
-    stdio: ["ignore", output, output],
-    env: { ...process.env, APP_HOST: host, APP_PORT: String(port) },
-  });
-  closeSync(output);
+  let child: ChildProcess;
+  try {
+    child = spawn(command, args, {
+      cwd: checkout,
+      // A new session: a group of its own for one signal to stop, and out of
+      // reach of the terminal's hangup.
+      detached: true,
+      stdio: ["ignore", output, output],
+      env: { ...process.env, APP_HOST: host, APP_PORT: String(port) },
+    });
+  } finally {
+    closeSync(output);
+  }
   child.unref();
   let exit: string | undefined;
   child.on("exit", (code, signal) => {
@@ -597,28 +848,14 @@ async function start(
     return EXIT_FAILED;
   }
   const pgid = child.pid;
-  const planned = urlOf(host.includes(":") ? `[${host}]` : host, port);
-  writeState(checkout, {
-    pgid,
-    port,
-    url: planned,
-    log: LOG_FILE,
-    checkout,
-    startedAt: new Date().toISOString(),
-  });
-  print(`starting the dev server on port ${port} (process group ${pgid}, log ${LOG_FILE})`);
 
-  // Until the verdict, an interruption stops what was started: the server is in
-  // a session of its own, so the terminal's Ctrl-C does not reach it.
-  let interrupted: NodeJS.Signals | undefined;
-  const interrupt = new AbortController();
-  const onSignal = (signal: NodeJS.Signals) => {
-    interrupted = signal;
-    interrupt.abort();
-  };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
+  // From here the group is stopped unless its page is proven: each verdict
+  // below says why, and an error on the way stops it just the same before it
+  // propagates. The server is in a session of its own, so the terminal's
+  // Ctrl-C does not reach it; the interruption `exclusive` catches does.
+  let settled = false;
   const giveUp = async (verdict: string, tail = true): Promise<number> => {
+    settled = true;
     await stopGroup(pgid, config.graceMs);
     removeState(checkout);
     if (tail) printLogTail(config, log);
@@ -626,14 +863,27 @@ async function start(
     return EXIT_FAILED;
   };
   const interruptedVerdict = () =>
-    `failed: interrupted — ${interrupted} arrived before the page was proven, so the server was stopped.`;
+    `failed: interrupted — ${interrupt.received()} arrived before the page was proven, so the ` +
+    "server was stopped.";
 
   try {
+    const leaderStart = startTimeOf(pgid);
+    if (leaderStart === undefined) {
+      return await giveUp(
+        `failed: exited — the dev server exited (${exit ?? "at once"}) before it could be recorded.`,
+      );
+    }
+    const startedAt = new Date().toISOString();
+    const record = (url: string) =>
+      writeState(checkout, { pgid, leaderStart, port, url, log: LOG_FILE, checkout, startedAt });
+    record(urlOf(host.includes(":") ? `[${host}]` : host, port));
+    print(`starting the dev server on port ${port} (process group ${pgid}, log ${LOG_FILE})`);
+
     // The port opens when a process of this group listens on it.
     const deadline = Date.now() + config.waitMs;
     let listening: Listener[] = [];
     for (;;) {
-      if (interrupted) return await giveUp(interruptedVerdict(), false);
+      if (interrupt.received()) return await giveUp(interruptedVerdict(), false);
       listening = readListeners(lsof, [port]).filter((listener) => listener.pgid === pgid);
       if (listening.length > 0) break;
       if (exit !== undefined) {
@@ -650,30 +900,21 @@ async function start(
       await sleep(200);
     }
 
-    const beyond = (sockets: readonly Listener[]) =>
-      sockets.filter((listener) => !isLoopbackAddress(listener.address));
-    if (beyond(listening).length > 0) {
+    // Every socket of the group, not only the app's port: a dev script may
+    // start something else beside the server, an inspector for one.
+    const wide = beyond(groupListeners(lsof, pgid));
+    if (wide.length > 0) {
       return await giveUp(
         `refused: not-loopback — the dev server listened beyond this machine ` +
-          `(${beyond(listening)
-            .map((l) => l.address)
-            .join(", ")}), so it was stopped before ` +
-          "anything could reach it.",
+          `(${addressesOf(wide)}), so it was stopped before its page was requested.`,
         false,
       );
     }
 
     const url = urlOf(loopbackAddressOf(listening), port);
-    writeState(checkout, {
-      pgid,
-      port,
-      url,
-      log: LOG_FILE,
-      checkout,
-      startedAt: new Date().toISOString(),
-    });
+    record(url);
     const page = await requestPage(url, config.pageMs, () => exit === undefined, interrupt.signal);
-    if (interrupted) return await giveUp(interruptedVerdict(), false);
+    if (interrupt.received()) return await giveUp(interruptedVerdict(), false);
     if (page.status === "exited") {
       return await giveUp(
         `failed: exited — the dev server exited (${exit}) before its page answered.`,
@@ -685,23 +926,24 @@ async function start(
       );
     }
 
-    // Listening sockets can be added after the first one; look once more.
-    const after = readListeners(lsof, [port]).filter((listener) => listener.pgid === pgid);
-    if (beyond(after).length > 0) {
+    // A listening socket can open after the first one; look once more.
+    const after = beyond(groupListeners(lsof, pgid));
+    if (after.length > 0) {
       return await giveUp(
         `refused: not-loopback — the dev server listened beyond this machine ` +
-          `(${beyond(after)
-            .map((l) => l.address)
-            .join(", ")}), so it was stopped.`,
+          `(${addressesOf(after)}), so it was stopped.`,
         false,
       );
     }
 
+    settled = true;
     print(`serving ${describePage(url, page.title)} (log ${LOG_FILE}); stop it with: make stop`);
     return EXIT_OK;
   } finally {
-    process.off("SIGINT", onSignal);
-    process.off("SIGTERM", onSignal);
+    if (!settled) {
+      await stopGroup(pgid, config.graceMs);
+      removeState(checkout);
+    }
   }
 }
 
@@ -711,22 +953,30 @@ async function start(
 export async function stop(config: ServeConfig): Promise<number> {
   const { print } = config;
   const checkout = realpathSync.native(config.checkout);
+  if (!existsSync(path.join(checkout, SERVE_DIR))) {
+    print("not-running — make serve has no server recorded in this checkout.");
+    return EXIT_OK;
+  }
+  try {
+    return await exclusive(config, checkout, () => stopChecked(config, checkout));
+  } catch (error) {
+    if (!(error instanceof NoLsofError)) throw error;
+    print(
+      "refused: no-lsof — make stop checks that the recorded process group still runs in this " +
+        `checkout before signalling it, and ${config.lsof} is not on the PATH.`,
+    );
+    return EXIT_FAILED;
+  }
+}
+
+async function stopChecked(config: ServeConfig, checkout: string): Promise<number> {
+  const { print } = config;
   const state = readState(checkout);
   if (state === undefined) {
     print("not-running — make serve has no server recorded in this checkout.");
     return EXIT_OK;
   }
-  let owner: "ours" | "gone" | "foreign";
-  try {
-    owner = ownership(config.lsof, state, checkout);
-  } catch (error) {
-    if (!(error instanceof NoLsofError)) throw error;
-    print(
-      `refused: no-lsof — make stop checks that process group ${state.pgid} still runs in this ` +
-        `checkout before signalling it, and ${config.lsof} is not on the PATH.`,
-    );
-    return EXIT_FAILED;
-  }
+  const owner = ownership(config.lsof, state, checkout);
   removeState(checkout);
   if (owner === "gone") {
     print(
@@ -736,8 +986,8 @@ export async function stop(config: ServeConfig): Promise<number> {
   }
   if (owner === "foreign") {
     print(
-      `not-running — process group ${state.pgid} no longer runs in this checkout, so it was ` +
-        "left alone.",
+      `not-running — process group ${state.pgid} is no longer the server make serve started ` +
+        "here, so it was left alone.",
     );
     return EXIT_OK;
   }

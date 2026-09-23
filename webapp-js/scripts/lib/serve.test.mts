@@ -5,8 +5,9 @@
 // stopping "the server" is proven to stop everything it started. Every case
 // runs in a checkout of its own, on ports found free, with the real lsof.
 
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -27,8 +28,10 @@ import {
   devScriptBindsLoopback,
   isLoopbackAddress,
   isLoopbackHost,
+  LOCK_FILE,
   parseServeArgs,
   serve,
+  startTimeOf,
   stop,
   STATE_FILE,
   type ServeConfig,
@@ -44,6 +47,7 @@ const TEMPLATE_DEV = "next dev -H ${APP_HOST:-127.0.0.1} -p ${APP_PORT:-4300}";
  * The fake dev server. The parent forks a child and stays, as `next dev` does;
  * the child listens on APP_HOST and APP_PORT. Every process appends its pid to
  * `pids` in the directory it runs in. Modes: `ok`, `wide` (binds every
+ * interface), `extra` (serves on loopback, and opens a second port on every
  * interface), `silent` (never listens), `slow` (listens after a minute),
  * `exit` (the parent fails at once) and `500` (the page answers 500).
  */
@@ -63,7 +67,8 @@ if (role === "parent") {
   fork(import.meta.filename, ["child", mode], { stdio: "inherit" });
   forever();
 } else {
-  const listen = () =>
+  const listen = () => {
+    if (mode === "extra") http.createServer().listen(0, "0.0.0.0");
     http
       .createServer((request, response) => {
         response.statusCode = mode === "500" ? 500 : 200;
@@ -71,6 +76,7 @@ if (role === "parent") {
         response.end("<html><head><title>Fake &amp; App</title></head><body></body></html>");
       })
       .listen(Number(process.env.APP_PORT), mode === "wide" ? "0.0.0.0" : process.env.APP_HOST);
+  };
   if (mode === "silent") forever();
   else if (mode === "slow") setTimeout(listen, 60_000);
   else listen();
@@ -307,6 +313,45 @@ describe("the loopback rules", () => {
   });
 });
 
+describe("what is refused or answered before a server is looked for", () => {
+  it("refuses a host beyond loopback before starting anything", async () => {
+    const checkout = checkoutWith();
+    const result = await run(
+      serve,
+      configFor(checkout, "ok", await freePorts(1), { host: "0.0.0.0" }),
+    );
+    expect(result.code).toBe(1);
+    expect(result.verdict).toMatch(/^refused: not-loopback — APP_HOST=0\.0\.0\.0 /);
+    expect(pidsIn(checkout)).toEqual([]);
+  });
+
+  it("refuses a dev script that binds no loopback host before starting anything", async () => {
+    const checkout = checkoutWith("next dev -p ${APP_PORT:-4300}");
+    const result = await run(serve, configFor(checkout, "ok", await freePorts(1)));
+    expect(result.verdict).toMatch(/^refused: not-loopback — the dev script in package\.json/);
+    expect(pidsIn(checkout)).toEqual([]);
+  });
+
+  it("refuses without lsof, before starting anything", async () => {
+    const checkout = checkoutWith();
+    const result = await run(
+      serve,
+      configFor(checkout, "ok", await freePorts(1), { lsof: "lsof-that-is-not-installed" }),
+    );
+    expect(result.verdict).toMatch(/^refused: no-lsof — /);
+    expect(pidsIn(checkout)).toEqual([]);
+  });
+
+  it("says so when nothing was started", async () => {
+    const checkout = checkoutWith();
+    const result = await run(stop, configFor(checkout, "ok", []));
+    expect(result.code).toBe(0);
+    expect(result.verdict).toBe(
+      "not-running — make serve has no server recorded in this checkout.",
+    );
+  });
+});
+
 describe("make serve", SPAWNS, () => {
   it("starts the server, proves its page, and reports it once", async () => {
     const checkout = checkoutWith();
@@ -337,24 +382,6 @@ describe("make serve", SPAWNS, () => {
     expect(stateOf(checkout)).toBeUndefined();
   });
 
-  it("refuses a host beyond loopback before starting anything", async () => {
-    const checkout = checkoutWith();
-    const result = await run(
-      serve,
-      configFor(checkout, "ok", await freePorts(1), { host: "0.0.0.0" }),
-    );
-    expect(result.code).toBe(1);
-    expect(result.verdict).toMatch(/^refused: not-loopback — APP_HOST=0\.0\.0\.0 /);
-    expect(pidsIn(checkout)).toEqual([]);
-  });
-
-  it("refuses a dev script that binds no loopback host before starting anything", async () => {
-    const checkout = checkoutWith("next dev -p ${APP_PORT:-4300}");
-    const result = await run(serve, configFor(checkout, "ok", await freePorts(1)));
-    expect(result.verdict).toMatch(/^refused: not-loopback — the dev script in package\.json/);
-    expect(pidsIn(checkout)).toEqual([]);
-  });
-
   it("stops a server that listens beyond loopback, with its whole group", async () => {
     const checkout = checkoutWith();
     const result = await run(serve, configFor(checkout, "wide", await freePorts(1)));
@@ -363,6 +390,76 @@ describe("make serve", SPAWNS, () => {
     expect(pidsIn(checkout)).toHaveLength(2);
     expect(await allGone(pidsIn(checkout))).toBe(true);
     expect(stateOf(checkout)).toBeUndefined();
+  });
+
+  it("stops a server whose group listens beyond loopback on another port", async () => {
+    const checkout = checkoutWith();
+    const result = await run(serve, configFor(checkout, "extra", await freePorts(1)));
+    expect(result.code).toBe(1);
+    expect(result.verdict).toMatch(
+      /^refused: not-loopback — the dev server listened beyond this machine \(\*:\d+\)/,
+    );
+    expect(await allGone(pidsIn(checkout))).toBe(true);
+    expect(stateOf(checkout)).toBeUndefined();
+  });
+
+  it("takes turns with another make serve in the same checkout, so one server runs", async () => {
+    const checkout = checkoutWith();
+    const ports = await freePorts(2);
+    const runs = await Promise.all([
+      run(serve, configFor(checkout, "ok", ports)),
+      run(serve, configFor(checkout, "ok", ports)),
+    ]);
+    const [second, first] = [...runs].sort((a, b) => a.verdict.localeCompare(b.verdict));
+    expect(first.verdict).toMatch(new RegExp(`^serving http://127\\.0\\.0\\.1:${ports[0]}/`));
+    expect(second.verdict).toMatch(
+      new RegExp(`^already-serving http://127\\.0\\.0\\.1:${ports[0]}/`),
+    );
+    expect(second.lines[0]).toMatch(/^waiting for another make serve or make stop \(pid \d+\)/);
+    const pids = pidsIn(checkout);
+    expect(pids).toHaveLength(2);
+    expect(stateOf(checkout)?.pgid).toBe(pids[0]);
+    expect(existsSync(path.join(checkout, LOCK_FILE))).toBe(false);
+
+    expect((await run(stop, configFor(checkout, "ok", ports))).verdict).toMatch(/^stopped /);
+    expect(await allGone(pids)).toBe(true);
+  });
+
+  it("refuses while a killed run's lock remains, and starts nothing", async () => {
+    const checkout = checkoutWith();
+    const gone = spawnSync(process.execPath, ["-e", ""]).pid;
+    mkdirSync(path.join(checkout, ".serve"));
+    writeFileSync(path.join(checkout, LOCK_FILE), `${gone}\nleft-behind\n`);
+
+    const result = await run(serve, configFor(checkout, "ok", await freePorts(1)));
+    expect(result.code).toBe(1);
+    expect(result.verdict).toMatch(
+      new RegExp(
+        `^refused: busy — \\.serve/lock is held by pid ${gone}, which is no longer running`,
+      ),
+    );
+    expect(pidsIn(checkout)).toEqual([]);
+    expect(existsSync(path.join(checkout, LOCK_FILE))).toBe(true);
+  });
+
+  it("stops what it started when an error breaks the start", async () => {
+    const checkout = checkoutWith();
+    // An lsof that stops being runnable once serve looks at the group's
+    // sockets, so the look after the page throws.
+    const lsof = path.join(tempDir("serve-lsof-"), "lsof");
+    writeFileSync(
+      lsof,
+      '#!/bin/sh\ncase " $* " in *" -g "*" -iTCP "*) chmod -x "$0" ;; esac\nexec lsof "$@"\n',
+    );
+    chmodSync(lsof, 0o755);
+
+    await expect(serve(configFor(checkout, "ok", await freePorts(1), { lsof }))).rejects.toThrow(
+      /EACCES/,
+    );
+    expect(pidsIn(checkout)).toHaveLength(2);
+    expect(await allGone(pidsIn(checkout))).toBe(true);
+    expect(stateOf(checkout)).toBeUndefined();
+    expect(existsSync(path.join(checkout, LOCK_FILE))).toBe(false);
   });
 
   it("steps around a port another directory holds, and leaves it alone", async () => {
@@ -444,16 +541,6 @@ describe("make serve", SPAWNS, () => {
     expect(await allGone(pidsIn(checkout))).toBe(true);
   });
 
-  it("refuses without lsof, before starting anything", async () => {
-    const checkout = checkoutWith();
-    const result = await run(
-      serve,
-      configFor(checkout, "ok", await freePorts(1), { lsof: "lsof-that-is-not-installed" }),
-    );
-    expect(result.verdict).toMatch(/^refused: no-lsof — /);
-    expect(pidsIn(checkout)).toEqual([]);
-  });
-
   it("reports a server a person started here, and make stop leaves it alone", async () => {
     const checkout = checkoutWith();
     const ports = await freePorts(2);
@@ -500,15 +587,6 @@ describe("make serve", SPAWNS, () => {
 });
 
 describe("make stop", SPAWNS, () => {
-  it("says so when nothing was started", async () => {
-    const checkout = checkoutWith();
-    const result = await run(stop, configFor(checkout, "ok", []));
-    expect(result.code).toBe(0);
-    expect(result.verdict).toBe(
-      "not-running — make serve has no server recorded in this checkout.",
-    );
-  });
-
   it("never signals a recorded group that no longer runs in this checkout", async () => {
     const checkout = checkoutWith();
     const elsewhere = tempDir("serve-recycled-");
@@ -517,6 +595,7 @@ describe("make stop", SPAWNS, () => {
     mkdirSync(path.join(checkout, ".serve"));
     const recycled: ServeState = {
       pgid: other.pid!,
+      leaderStart: startTimeOf(other.pid!)!,
       port: 4300,
       url: "http://127.0.0.1:4300/",
       log: ".serve/server.log",
@@ -527,7 +606,33 @@ describe("make stop", SPAWNS, () => {
 
     const result = await run(stop, configFor(checkout, "ok", []));
     expect(result.verdict).toMatch(
-      /^not-running — process group \d+ no longer runs in this checkout/,
+      /^not-running — process group \d+ is no longer the server make serve started here/,
+    );
+    expect(alive(other.pid!)).toBe(true);
+    expect(stateOf(checkout)).toBeUndefined();
+  });
+
+  it("never signals a recorded group whose first process is another one, even here", async () => {
+    // A stale record whose id now names a process started in this checkout —
+    // a shell, an editor, or the make running the command.
+    const checkout = checkoutWith();
+    const other = startOutside(checkout, ["-e", "setInterval(() => {}, 1 << 30)"]);
+    await sleep(200);
+    mkdirSync(path.join(checkout, ".serve"));
+    const stale: ServeState = {
+      pgid: other.pid!,
+      leaderStart: "a process that ended long ago",
+      port: 4300,
+      url: "http://127.0.0.1:4300/",
+      log: ".serve/server.log",
+      checkout,
+      startedAt: new Date().toISOString(),
+    };
+    writeFileSync(path.join(checkout, STATE_FILE), JSON.stringify(stale));
+
+    const result = await run(stop, configFor(checkout, "ok", []));
+    expect(result.verdict).toMatch(
+      /^not-running — process group \d+ is no longer the server make serve started here/,
     );
     expect(alive(other.pid!)).toBe(true);
     expect(stateOf(checkout)).toBeUndefined();
