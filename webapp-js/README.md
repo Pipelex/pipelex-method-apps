@@ -19,8 +19,10 @@ cd my-app && git init
 export PIPELEX_API_KEY=…                               # from app.pipelex.com
 export PIPELEX_BASE_URL=https://api-dev.pipelex.com    # for now — see below
 make create METHOD=path/to/my_method.mthds
-make dev                                               # http://127.0.0.1:4300
+make dev                                               # http://127.0.0.1:4300, in this terminal
 ```
+
+`make serve` starts the same server in the background instead, prints its URL once the page answers, and `make stop` stops it.
 
 `METHOD` is a `.mthds` file or a directory of them, a method id from your organization's catalog (`mt_…`, from [app.pipelex.com](https://app.pipelex.com)), or a published package address (`github.com/Pipelex/methods/text_stats@v0.1.1`).
 
@@ -79,11 +81,15 @@ A variable already exported in your shell wins over `.env.local`.
 
 Widen the host only on a network you trust, for a container or to open the app on another device: `make dev APP_HOST=0.0.0.0`. The Makefile prints a warning each time a server starts beyond loopback. `npm run dev` and `npm run start` read the same two variables and fall back to the same defaults.
 
+`make serve` runs the dev server in the background and never beyond loopback: it refuses an `APP_HOST` that is not, and it stops a server that turns out to listen anywhere else before a page can compile. It takes `APP_PORT` when you give one, and otherwise the first port from 4300 to 4309 that no other directory holds. It then checks that the listener is the server it started, requests the page, and ends with one line: `serving http://127.0.0.1:4300/ — "<title>"`, or a refusal or a failure naming its cause. The server's log is `.serve/server.log`. Running it again reports the same server as `already-serving`, and a server you started here with `make dev` is reported too and left alone. Two runs in one checkout take turns, the second waiting for the first. `make stop` stops only what `make serve` started. It needs `lsof`, which macOS ships; on Linux, install it from your distribution's packages if `make serve` says it is missing, BusyBox's included.
+
 ## Make targets
 
 | Target                    | Purpose                                                                                                                             |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | `make dev`                | Start the Next.js dev server on `127.0.0.1:4300` — see [Where the app listens](#where-the-app-listens)                              |
+| `make serve`              | Start the dev server in the background, prove the page answers, and print its URL                                                   |
+| `make stop`               | Stop the dev server `make serve` started                                                                                            |
 | `make build`              | Production build                                                                                                                    |
 | `make create`             | Turn the template into the app for one method — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                             |
 | `make add-method`         | Scaffold a method into the app — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                                            |
