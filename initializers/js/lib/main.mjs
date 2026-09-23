@@ -197,6 +197,14 @@ function planGit(args, dest, found, env) {
           `${dest} is a repository with commits whose working tree holds nothing but .git, so every tracked file shows as deleted, and the pristine commit would record that deletion: start in a new directory, or restore the files first`,
         );
       }
+      if (reading.staged.length > 0) {
+        const shown = reading.staged.slice(0, 3).join(", ");
+        const more = reading.staged.length > 3 ? ` and ${reading.staged.length - 3} more` : "";
+        throw Verdict.refused(
+          "repository-has-staged-files",
+          `${dest} is a repository with no commit whose index already holds ${shown}${more}, which the pristine commit would record beside the template: start in a new directory, or empty the index first with git -C ${shellQuote(dest)} rm -r -q --cached .`,
+        );
+      }
       plan = { commit: true, init: false };
       break;
     case "inside":

@@ -1,7 +1,7 @@
 {
   "about": "The cases every initializer of the family executes, so that each prints the same verdict for the same destination, git state and flags. Each suite runs its initializer with a stub make that records its arguments and exits with make_exit, a PATH holding that stub and the real git, a git configuration of its own, and PIPELEX_API_KEY set unless key is false.",
   "legend": {
-    "destination": "What stands at the destination before the run. missing: nothing; empty: an empty directory; git-without-commit: a directory holding only the .git of git init; git-with-history: a directory holding only the .git of a repository with a commit, its files deleted; ds-store: a directory holding .DS_Store; user-file: a directory holding notes.txt; beneath-a-file: the destination is typed as notes.txt/my-app, notes.txt being a file, so nothing can stand there.",
+    "destination": "What stands at the destination before the run. missing: nothing; empty: an empty directory; git-without-commit: a directory holding only the .git of git init; git-with-history: a directory holding only the .git of a repository with a commit, its files deleted; git-with-staged-file: a directory holding only the .git of git init whose index holds notes.txt, added and then deleted from the directory; ds-store: a directory holding .DS_Store; user-file: a directory holding notes.txt; beneath-a-file: the destination is typed as notes.txt/my-app, notes.txt being a file, so nothing can stand there.",
     "spelled": "How the destination is typed. name: my-app, from its parent; space: my app, from its parent; dot: ., from inside it (the destination must exist); absent: no directory at all.",
     "within": "Where the destination's parent is. nothing: a directory no repository tracks; work-tree: inside the work tree of a repository with a commit and an origin of its own; template-checkout: inside the work tree of a repository whose origin is https://github.com/Pipelex/pipelex-method-apps.git.",
     "args": "The arguments after the destination. {other-ecosystem} stands for a template the other ecosystem's initializer serves.",
@@ -55,6 +55,16 @@
       "destination": "git-with-history",
       "expect": {
         "verdict": "refused: repository-has-history",
+        "written": false,
+        "git": "untouched",
+        "make": false
+      }
+    },
+    {
+      "name": "a lone .git with no commit but a staged file is refused",
+      "destination": "git-with-staged-file",
+      "expect": {
+        "verdict": "refused: repository-has-staged-files",
         "written": false,
         "git": "untouched",
         "make": false

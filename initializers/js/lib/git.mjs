@@ -3,16 +3,20 @@
  *
  *   inside no work tree                    → a new repository on main, then the pristine commit
  *   the root of a repository with no commit → the pristine commit, its first
+ *     … whose index already holds an entry → refused: repository-has-staged-files
  *   the root of a repository with history  → refused: repository-has-history
  *   inside another repository's work tree  → no repository and no commit
  *   inside a checkout of a template        → refused: inside-template-checkout
  *
  * A directory holding only `.git` whose repository has commits is one whose
  * working tree shows every tracked file deleted, and landing the template on it
- * would fold that deletion into the commit. A repository planted inside another
- * one's work tree makes the enclosing one fail `git add -A` until the nested
- * one has a commit, and then see an embedded repository, so the project becomes
- * new files in the enclosing repository instead, as `create-next-app` does.
+ * would fold that deletion into the commit. One with no commit can still hold
+ * staged entries, a file added and then deleted from the directory, and the
+ * pristine commit would record them beside the template. A repository planted
+ * inside another one's work tree makes the enclosing one fail `git add -A`
+ * until the nested one has a commit, and then see an embedded repository, so
+ * the project becomes new files in the enclosing repository instead, as
+ * `create-next-app` does.
  */
 
 import { spawnSync } from "node:child_process";
@@ -59,7 +63,7 @@ export function git(args, { cwd, env }) {
  *
  *   { kind: "outside" }
  *   { kind: "template-checkout", origin }
- *   { kind: "root", history: boolean }
+ *   { kind: "root", history: boolean, staged: string[] }   `staged` is read only when there is no history
  *   { kind: "inside", toplevel }
  *   { kind: "unreadable-git" }   the destination holds a `.git` git does not read as its repository
  */
@@ -76,7 +80,9 @@ export function readGit({ dest, from, destExists, destHasGit, env }) {
     const prefix = git(["rev-parse", "--show-prefix"], { cwd: dest, env });
     if (prefix.status === 0 && prefix.stdout === "") {
       const head = git(["rev-parse", "-q", "--verify", "HEAD"], { cwd: dest, env });
-      return { kind: "root", history: head.status === 0 };
+      if (head.status === 0) return { kind: "root", history: true, staged: [] };
+      const index = git(["ls-files", "-z"], { cwd: dest, env });
+      return { kind: "root", history: false, staged: index.stdout.split("\0").filter(Boolean) };
     }
     if (destHasGit) return { kind: "unreadable-git" };
   }

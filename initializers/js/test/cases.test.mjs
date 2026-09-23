@@ -67,6 +67,13 @@ function destination(dest, kind, env) {
       git(dest, ["commit", "-q", "-m", "History"], env);
       fs.rmSync(path.join(dest, "old.txt"));
       return;
+    case "git-with-staged-file":
+      fs.mkdirSync(dest);
+      git(dest, ["init", "-q"], env);
+      fs.writeFileSync(path.join(dest, "notes.txt"), "mine\n");
+      git(dest, ["add", "notes.txt"], env);
+      fs.rmSync(path.join(dest, "notes.txt"));
+      return;
     case "ds-store":
       fs.mkdirSync(dest);
       fs.writeFileSync(path.join(dest, ".DS_Store"), "");

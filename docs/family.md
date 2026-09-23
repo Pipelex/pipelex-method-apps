@@ -67,7 +67,7 @@ make -C my-app serve
 
 **Each initializer's table of templates is `templates.json` at its root**, which says which templates it serves, the extras each one's `make create` takes, and the command of the other ecosystem's initializer, named when a person asks one for the other's template (`refused: other-ecosystem`). JSON, so the root reads every initializer's table whatever its language: `scripts/initializers.test.mjs` fails when a template of `TEMPLATES` is served by no initializer or by more than one, and when a table's variables are not the `make create` contract's.
 
-**`initializers/cases.json` is the table of cases every initializer executes**: destinations (missing, empty, a lone `.git` with and without history, a `.DS_Store`, a file of the user's, spelled `.`, a name with a space), git states (none, inside another work tree, inside a template's checkout, `--no-git`), flags, and the verdict each must print. The npm initializer's suite runs it now, and the Python one will, so the two print the same verdicts for the same situations.
+**`initializers/cases.json` is the table of cases every initializer executes**: destinations (missing, empty, a lone `.git` with and without history, a lone `.git` with a staged file and no commit, a `.DS_Store`, a file of the user's, spelled `.`, a name with a space), git states (none, inside another work tree, inside a template's checkout, `--no-git`), flags, and the verdict each must print. The npm initializer's suite runs it now, and the Python one will, so the two print the same verdicts for the same situations.
 
 ## The version and the release
 
