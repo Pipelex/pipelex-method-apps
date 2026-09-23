@@ -20,6 +20,8 @@
  */
 
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 
 /**
  * The repositories whose checkouts are templates, read from `origin`: the
@@ -101,6 +103,32 @@ export function hasIdentity({ cwd, env }) {
     git(["var", "GIT_AUTHOR_IDENT"], { cwd, env }).status === 0 &&
     git(["var", "GIT_COMMITTER_IDENT"], { cwd, env }).status === 0
   );
+}
+
+/**
+ * Whether git can name an author and a committer for the commit in the
+ * repository about to be made at `dest`, which `from`, the destination or its
+ * nearest existing ancestor, stands outside of. Outside a repository git reads
+ * no `includeIf "gitdir:…"` section, so an identity given only to the
+ * repositories under a directory is invisible from `from`. When that reading
+ * finds none, the question is asked again inside a throwaway repository made
+ * at `dest`, and the repository, with every directory made for it, is removed
+ * before the answer is returned. A probe that cannot be made answers no.
+ */
+export function hasIdentityForInit({ dest, from, env }) {
+  if (hasIdentity({ cwd: from, env })) return true;
+  const probe = path.join(dest, ".git");
+  if (fs.existsSync(probe)) return false;
+  const made =
+    from === dest ? probe : path.join(from, path.relative(from, dest).split(path.sep)[0]);
+  try {
+    fs.mkdirSync(dest, { recursive: true });
+    return git(["init", "-q"], { cwd: dest, env }).status === 0 && hasIdentity({ cwd: dest, env });
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(made, { recursive: true, force: true });
+  }
 }
 
 /** The pristine commit's message, in the scaffold skill's format. */

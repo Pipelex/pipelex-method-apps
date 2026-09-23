@@ -5,12 +5,15 @@
  *
  * The order is the safety story:
  *
- *  1. **A preflight that writes nothing.** The arguments and the template;
- *     Node at or above the template's `engines` floor; `make`, and `git`
- *     unless `--no-git`; `--method` and `PIPELEX_API_KEY` unless `--no-create`,
- *     the key tested for presence and never printed; the destination rule;
- *     git's reading of the destination, and an identity when a commit will be
- *     made. Each failure is a `refused:` verdict naming the fix.
+ *  1. **A preflight that leaves nothing behind.** The arguments and the
+ *     template; Node at or above the template's `engines` floor; `make`, and
+ *     `git` unless `--no-git`; `--method` and `PIPELEX_API_KEY` unless
+ *     `--no-create`, the key tested for presence and never printed; the
+ *     destination rule; git's reading of the destination, and an identity when
+ *     a commit will be made. It writes nothing but the throwaway repository in
+ *     which a new repository's identity is read when none shows outside one,
+ *     and removes that before going on. Each failure is a `refused:` verdict
+ *     naming the fix.
  *  2. **The write**, exclusive, removing what it created when it cannot finish.
  *  3. **Git**: a new repository on `main` outside any work tree, then the pristine
  *     commit; the commit alone at the root of a repository with no commit yet;
@@ -32,6 +35,7 @@ import { destinationProblem, nearestExisting, readDestination } from "./destinat
 import {
   commitPristine,
   hasIdentity,
+  hasIdentityForInit,
   pristineByHand,
   pristineMessage,
   readGit,
@@ -216,7 +220,10 @@ function planGit(args, dest, found, env) {
     default:
       plan = { commit: true, init: true };
   }
-  if (!hasIdentity({ cwd: from, env })) {
+  const identity = plan.init
+    ? hasIdentityForInit({ dest, from, env })
+    : hasIdentity({ cwd: from, env });
+  if (!identity) {
     throw Verdict.refused(
       "no-git-identity",
       "git has no identity to make the pristine commit with: set one with git config --global user.name '…' and git config --global user.email '…', or pass --no-git",

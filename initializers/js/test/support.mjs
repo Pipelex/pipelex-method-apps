@@ -123,6 +123,16 @@ export function runEnv(
   });
 }
 
+/**
+ * Give git an identity only for the repositories under `dir`, through an
+ * `includeIf "gitdir:…"` section, in the configuration `runEnv` wrote.
+ */
+export function scopeIdentity(env, dir) {
+  const scoped = `${env.GIT_CONFIG_GLOBAL}-scoped`;
+  fs.writeFileSync(scoped, "[user]\n\tname = Scoped Runner\n\temail = scoped@example.com\n");
+  fs.appendFileSync(env.GIT_CONFIG_GLOBAL, `[includeIf "gitdir:${dir}/"]\n\tpath = ${scoped}\n`);
+}
+
 /** What the stub make recorded, or null when it never ran. */
 export function makeRecord(root) {
   const base = path.join(root, "make-record");

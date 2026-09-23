@@ -8,7 +8,15 @@ import process from "node:process";
 import { describe, it } from "node:test";
 
 import { decodePack } from "../lib/pack.mjs";
-import { git, makeRecord, packs, runEnv, runInitializer, tempRoot } from "./support.mjs";
+import {
+  git,
+  makeRecord,
+  packs,
+  runEnv,
+  runInitializer,
+  scopeIdentity,
+  tempRoot,
+} from "./support.mjs";
 
 const KEY = "pk_test_never_printed_8d1f";
 
@@ -266,6 +274,31 @@ describe("a run", () => {
     const dest = path.join(work, "app");
     assert.equal(git(dest, ["symbolic-ref", "--short", "HEAD"], env), "main");
     assert.equal(git(dest, ["rev-list", "--count", "HEAD"], env), "1");
+  });
+
+  it("removes every directory its identity probe made when git has no identity there either", async () => {
+    const { root, work } = workspace();
+    const { output, verdict } = await runInitializer(["deep/er/app", "--no-create"], {
+      cwd: work,
+      env: runEnv(root, { identity: false }),
+    });
+    assert.equal(verdict, "refused: no-git-identity", output);
+    assert.deepEqual(fs.readdirSync(work), []);
+  });
+
+  it("commits with an identity git gives only to the repositories under a directory", async () => {
+    const { root, work } = workspace();
+    const env = runEnv(root, { identity: false });
+    scopeIdentity(env, work);
+    const { output, verdict } = await runInitializer(["deep/er/app", "--no-create"], {
+      cwd: work,
+      env,
+    });
+    assert.equal(verdict, "copied", output);
+    assert.equal(
+      git(path.join(work, "deep", "er", "app"), ["log", "-1", "--format=%an <%ae>"], env),
+      "Scoped Runner <scoped@example.com>",
+    );
   });
 
   it("names the copy and the next make create after --no-create", async () => {

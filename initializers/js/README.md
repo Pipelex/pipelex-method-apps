@@ -50,6 +50,8 @@ The initializer reads git before it writes anything:
 | Inside another repository's work tree                                                            | No repository and no commit: the project is new files in that repository. `--no-create` lets you commit the template there first |
 | Inside a checkout of `pipelex-method-apps` or of a starter                                       | Refused, `--no-git` included whenever git is on the PATH                                                                         |
 
+A commit needs a git identity, and a missing one is refused before anything is written. When git shows none outside a repository, the initializer asks again inside a throwaway repository at the destination, which it removes before going on, so an identity given only by an `includeIf "gitdir:…"` section is found.
+
 The pristine commit reads `Start from Pipelex/pipelex-method-apps/webapp-js <version> (<sha>)`, so `make create`'s changes are a diff you can read before committing them. `make create` itself commits nothing.
 
 ## What it prints

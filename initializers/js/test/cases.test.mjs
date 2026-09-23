@@ -16,6 +16,7 @@ import {
   packs,
   runEnv,
   runInitializer,
+  scopeIdentity,
   setupEnv,
   tempRoot,
 } from "./support.mjs";
@@ -132,14 +133,17 @@ describe("initializers/cases.json", () => {
         ...(c.args ?? []).map((arg) => (arg === "{other-ecosystem}" ? OTHER_ECOSYSTEM : arg)),
       );
 
+      const identity = c.git_identity ?? true;
+      const runsIn = runEnv(root, {
+        tools: c.tools,
+        identity: identity === true,
+        key: c.key !== false,
+        makeExit: c.make_exit ?? 0,
+      });
+      if (identity === "under-parent") scopeIdentity(runsIn, parent);
       const { code, output, verdict } = await runInitializer(argv, {
         cwd: c.spelled === "dot" ? dest : parent,
-        env: runEnv(root, {
-          tools: c.tools,
-          identity: c.git_identity !== false,
-          key: c.key !== false,
-          makeExit: c.make_exit ?? 0,
-        }),
+        env: runsIn,
       });
 
       const expect = c.expect;
