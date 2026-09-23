@@ -81,24 +81,24 @@ Widen the host only on a network you trust, for a container or to open the app o
 
 ## Make targets
 
-| Target                | Purpose                                                                                                                             |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `make dev`            | Start the Next.js dev server on `127.0.0.1:4300` — see [Where the app listens](#where-the-app-listens)                              |
-| `make build`          | Production build                                                                                                                    |
-| `make create`         | Turn the template into the app for one method — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                             |
-| `make add-method`     | Scaffold a method into the app — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                                            |
-| `make codegen`        | Regenerate `src/generated/` from `methods/` (needs an API key)                                                                      |
-| `make codegen-check`  | Prove `src/generated/` is current — offline, no key                                                                                 |
-| `make codegen-verify` | Ask the API whether the committed types still match the methods (needs an API key)                                                  |
-| `make test`           | Unit tests                                                                                                                          |
-| `make test-e2e`       | **Optional** Playwright e2e — a live spec costs an LLM call (prompts first; auto-skips without a key)                               |
-| `make check`          | lint + format-check + typecheck + codegen-check                                                                                     |
-| `make all`            | check + test + build                                                                                                                |
-| `make use-local`      | Install the sibling `../pipelex-sdk-js` and `../mthds-form` checkouts into `node_modules` (`SIBLINGS_DIR=` names another directory) |
-| `make use-local-form` | Install the sibling `../mthds-form` checkout alone                                                                                  |
-| `make use-npm`        | Restore the `@pipelex/sdk` and `@pipelex/mthds-form` versions the lockfile pins                                                     |
-| `make use-npm-form`   | Restore the `@pipelex/mthds-form` version the lockfile pins                                                                         |
-| `make local-status`   | Say whether each `@pipelex` package comes from a sibling checkout or from npm                                                       |
+| Target                    | Purpose                                                                                                                             |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `make dev`                | Start the Next.js dev server on `127.0.0.1:4300` — see [Where the app listens](#where-the-app-listens)                              |
+| `make build`              | Production build                                                                                                                    |
+| `make create`             | Turn the template into the app for one method — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                             |
+| `make add-method`         | Scaffold a method into the app — `METHOD=<bundle \| mt_… \| address>` (needs an API key)                                            |
+| `make codegen`            | Regenerate `src/generated/` from `methods/` (needs an API key)                                                                      |
+| `make codegen-check`      | Prove `src/generated/` is current — offline, no key                                                                                 |
+| `make codegen-verify`     | Ask the API whether the committed types still match the methods (needs an API key)                                                  |
+| `make test`               | Unit tests                                                                                                                          |
+| `make test-e2e`           | **Optional** Playwright e2e — a live spec costs an LLM call (prompts first; auto-skips without a key)                               |
+| `make check`              | lint + format-check + typecheck + codegen-check                                                                                     |
+| `make all`                | check + test + build                                                                                                                |
+| `make use-local`          | Install the sibling `../pipelex-sdk-js` and `../mthds-form` checkouts into `node_modules` (`SIBLINGS_DIR=` names another directory) |
+| `make use-local-form`     | Install the sibling `../mthds-form` checkout alone                                                                                  |
+| `make use-published`      | Restore the `@pipelex/sdk` and `@pipelex/mthds-form` versions the lockfile pins                                                     |
+| `make use-published-form` | Restore the `@pipelex/mthds-form` version the lockfile pins                                                                         |
+| `make local-status`       | Say whether each `@pipelex` package comes from a sibling checkout or from npm                                                       |
 
 `make help` lists them all.
 

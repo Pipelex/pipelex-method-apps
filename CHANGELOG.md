@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Workflow twins run setup-uv in the template**: the root's workflow renderer sets a setup-uv step's `working-directory` to the template, so the twin reads the template's uv version, Python and settings and caches against its files, as the template's own workflow does in a project; setup-uv defaults to the repository root, where it would read none of them and cache against every template's lock. A template that installs with uv can now join the family.
+- **The `make create` contract is pinned**: a root test runs `make -n create` in every template and fails when one of them forwards a variable the scaffold skill passes differently from the others, alters its value, or forwards one left blank or only exported by the shell.
+
 ### Changed
 
+- **`make use-published` and `make use-published-form` (Breaking)**: the web app template's `use-npm` and `use-npm-form` take the family's names, which every template answers whatever registry its packages come from, and `make un` now runs `use-published`. The same renames apply at the root, where the targets that switch the form kernel alone run only in the templates that depend on it.
 - **The web app template runs on `@pipelex/sdk` 0.19.0**: `prepareInputs` now refuses when the API states that it determined no entry pipe, where it used to fall back to the closure's `main_pipe`. Nothing changes for a project made from the template, because every action `make add-method` writes already names the pipe it runs — the scaffold resolves that ref when it writes the action, so a method the API states no default for still runs.
 
 ### Fixed

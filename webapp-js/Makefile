@@ -1,4 +1,4 @@
-.PHONY: help run dev build start port-check lint format format-check typecheck codegen codegen-check codegen-verify add-method test test-watch test-e2e test-e2e-ui confirm-live-e2e agent-test check clean install lock all use-local use-local-form use-npm use-npm-form local-status ul un
+.PHONY: help run dev build start port-check lint format format-check typecheck codegen codegen-check codegen-verify add-method test test-watch test-e2e test-e2e-ui confirm-live-e2e agent-test check clean install lock all use-local use-local-form use-published use-published-form local-status ul un
 
 # ── Arguments ──────────────────────────────────────────────────────────────
 # The gestures take their values as make variables (`make add-method
@@ -225,8 +225,8 @@ clean: ## Remove build artifacts and caches
 # `@pipelex/mthds-form` packages from npm. `make use-local` packs and installs
 # the sibling pipelex-sdk-js and mthds-form checkouts so you can develop them
 # and the app side-by-side, and `make use-local-form` does the same for the form
-# kernel alone. `make use-npm` and `make use-npm-form` switch back, and
-# `make local-status` says which mode node_modules is in.
+# kernel alone. `make use-published` and `make use-published-form` switch back,
+# and `make local-status` says which mode node_modules is in.
 #
 # The siblings are looked for in the parent directory. SIBLINGS_DIR=<dir> names
 # another one — `../..` for a checkout nested one level deeper than its
@@ -301,20 +301,20 @@ endef
 
 use-local: ## Pack and install the sibling pipelex-sdk-js and mthds-form checkouts into node_modules (from .., or SIBLINGS_DIR=<dir>)
 	$(call install_local,$(SDK_DIR) $(FORM_DIR),@pipelex/sdk @pipelex/mthds-form)
-	@echo "Now using the local pipelex-sdk-js and mthds-form (tarball installs). Re-run after every edit. 'make use-npm' to switch back."
+	@echo "Now using the local pipelex-sdk-js and mthds-form (tarball installs). Re-run after every edit. 'make use-published' to switch back."
 
 use-local-form: ## Pack and install the sibling mthds-form checkout alone into node_modules (from .., or SIBLINGS_DIR=<dir>)
 	$(call refuse_while_sdk_local,use-local)
 	$(call install_local,$(FORM_DIR),@pipelex/mthds-form)
-	@echo "Now using the local mthds-form (tarball install). Re-run after every kernel edit. 'make use-npm-form' to switch back."
+	@echo "Now using the local mthds-form (tarball install). Re-run after every kernel edit. 'make use-published-form' to switch back."
 
-use-npm: ## Restore the @pipelex/sdk and @pipelex/mthds-form versions package-lock.json pins
+use-published: ## Restore the @pipelex/sdk and @pipelex/mthds-form versions package-lock.json pins
 	rm -rf node_modules/@pipelex/sdk node_modules/@pipelex/mthds-form
 	npm install @pipelex/sdk@$(call locked,@pipelex/sdk) @pipelex/mthds-form@$(call locked,@pipelex/mthds-form) --no-save --silent
 	@$(SOURCE_OF) @pipelex/sdk @pipelex/mthds-form
 
-use-npm-form: ## Restore the @pipelex/mthds-form version package-lock.json pins
-	$(call refuse_while_sdk_local,use-npm)
+use-published-form: ## Restore the @pipelex/mthds-form version package-lock.json pins
+	$(call refuse_while_sdk_local,use-published)
 	rm -rf node_modules/@pipelex/mthds-form
 	npm install @pipelex/mthds-form@$(call locked,@pipelex/mthds-form) --no-save --silent
 	@$(SOURCE_OF) @pipelex/mthds-form
@@ -323,4 +323,4 @@ local-status: ## Say whether @pipelex/sdk and @pipelex/mthds-form come from a si
 	@$(SOURCE_OF) @pipelex/sdk @pipelex/mthds-form
 
 ul: use-local ## Alias for use-local
-un: use-npm ## Alias for use-npm
+un: use-published ## Alias for use-published
