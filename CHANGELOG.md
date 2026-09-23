@@ -4,7 +4,7 @@
 
 ### Added
 
-- **Workflow twins cache uv against the template's lock**: the root's workflow renderer points a setup-uv step's cache at the template's `uv.lock`, as it points an npm cache at its `package-lock.json`. It refuses a step that sets its own `cache-dependency-glob` or leaves `enable-cache` unstated, because setup-uv caches by default against every lock in the repository. A template that installs with uv can now join the family.
+- **Workflow twins run setup-uv in the template**: the root's workflow renderer sets a setup-uv step's `working-directory` to the template, so the twin reads the template's uv version, Python and settings and caches against its files, as the template's own workflow does in a project; setup-uv defaults to the repository root, where it would read none of them and cache against every template's lock. A template that installs with uv can now join the family.
 - **The `make create` contract is pinned**: a root test runs `make -n create` in every template and fails when one of them forwards a variable the scaffold skill passes differently from the others, alters its value, or forwards one left blank or only exported by the shell.
 
 ### Changed

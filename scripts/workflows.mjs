@@ -16,21 +16,22 @@
  * the source's comments and layout. It refuses a source it cannot render
  * faithfully rather than guessing: a quoted name, a job that already sets
  * `defaults`, a job without an inline `runs-on` to set the working directory
- * after, a flow mapping, a setup-node cache other than npm's, a setup-uv step
- * that leaves `enable-cache` unstated, and everything GitHub or an action
+ * after, a flow mapping, a `cache:` input other than npm's whichever action
+ * takes it, a setup-uv step with no `with:` block, and everything GitHub
  * resolves from the repository root rather than from the template's directory
- * — a key named for a path, a file or a directory, setup-uv's
- * `cache-dependency-glob`, a local action, and `hashFiles`. An action input
- * that holds a path under any other name is not recognised, so a new
- * workflow's twin is read before it is committed. It also refuses to write
- * over a hand-written root workflow that has a twin's name.
+ * — a key named for a path, a file or a directory, a local action, and
+ * `hashFiles`. An action input that holds a path under any other name is not
+ * recognised, so a new workflow's twin is read before it is committed. It also
+ * refuses to write over a hand-written root workflow that has a twin's name.
  *
- * Each cache is pointed at the template's own lock file: an npm cache gets
- * `cache-dependency-path: <template>/package-lock.json`, and a setup-uv step
- * whose cache is on gets `cache-dependency-glob: <template>/uv.lock`, both
- * placed after the line that turns the cache on. setup-uv reads its glob from
- * the repository root, and its default matches every lock in the repository,
- * so a twin left to it would cache against the other templates' locks too.
+ * Two actions are carried into the template's directory. An npm cache gets
+ * `cache-dependency-path: <template>/package-lock.json` after its `cache:`
+ * line. A setup-uv step gets `working-directory: <template>` as the first of
+ * its inputs, because setup-uv reads everything from that directory — the uv
+ * version, the Python, where the virtual environment goes, and the files its
+ * cache glob matches — and it defaults to the repository root, where a twin
+ * would read none of the template's settings and cache against every
+ * template's lock.
  *
  * Zero dependencies; runs on the Node the templates already need.
  */
@@ -81,20 +82,21 @@ export function renderTwin(template, file, source) {
   // then the indentation of its items' dashes once the first is read.
   let steps = null;
   // The step being read, for the inputs of the action it uses: its `uses` line
-  // when that names setup-uv, and where its `enable-cache` line went.
+  // when that names setup-uv, the indentation of its `with:` key while that
+  // block's first input is awaited, and where that first input went.
   let step = null;
-  // A setup-uv step's cache is pointed at the template's lock once the whole
-  // step is read, since its `uses` may come after its `with`.
+  // A setup-uv step is given the template as its working directory once the
+  // whole step is read, since its `uses` may come after its `with`.
   const closeStep = () => {
     if (step?.uv) {
-      if (!step.enableCache) {
+      if (!step.firstInput) {
         refuse(
           step.uv,
-          "setup-uv caches by default: state enable-cache, so the twin can point the cache at the template's uv.lock",
+          "setup-uv reads its settings from its working directory: give the step a `with:` block, so the twin can set it to the template",
         );
       }
-      const { at, indent, on } = step.enableCache;
-      if (on) out.splice(at + 1, 0, `${indent}cache-dependency-glob: ${template}/uv.lock`);
+      const { at, indent } = step.firstInput;
+      out.splice(at, 0, `${indent}working-directory: ${template}`);
     }
     step = null;
   };
@@ -114,17 +116,29 @@ export function renderTwin(template, file, source) {
       closeJob();
       inJobs = /^jobs:\s*(#.*)?$/.test(line);
     }
-    // A blank line or a comment says nothing about where a step ends.
+    // A blank line or a comment says nothing about where a step ends. A dash
+    // may stand alone on its line, with the step's first key on the next.
     if (steps && /^\s*[^\s#]/.test(line)) {
       const indent = /^ */.exec(line)[0].length;
-      const dash = /^ *- /.test(line);
+      const dash = /^ *-(\s|$)/.test(line);
       if (steps.dash === null && dash && indent >= steps.key) steps.dash = indent;
       if (dash && indent === steps.dash) {
         closeStep();
-        step = { uv: null, enableCache: null };
+        step = { uv: null, withKey: null, firstInput: null };
       } else if (indent <= (steps.dash ?? steps.key)) {
         closeStep();
         steps = null;
+      }
+      if (step) {
+        // The line after `with:` is its first input when it sits deeper, and
+        // otherwise the block is empty. `out.length` is where this line goes.
+        if (step.withKey !== null && !step.firstInput) {
+          if (indent > step.withKey) {
+            step.firstInput = { at: out.length, indent: /^ */.exec(line)[0] };
+          } else step.withKey = null;
+        }
+        const withKey = /^( *)(- )?with:\s*(#.*)?$/.exec(line);
+        if (withKey) step.withKey = withKey[1].length + (withKey[2] ? 2 : 0);
       }
     }
     const jobKey = inJobs && /^ {2}([\w-]+):\s*(#.*)?$/.exec(line);
@@ -143,12 +157,6 @@ export function renderTwin(template, file, source) {
     if (/^\s+(- )?[\w-]*(path|paths|file|files|directory)(-ignore)?:/.test(line)) {
       refuse(line, "a key naming a path is read from the repository root");
     }
-    if (/^\s+(- )?cache-dependency-glob:/.test(line)) {
-      refuse(
-        line,
-        "setup-uv reads cache-dependency-glob from the repository root, so the twin sets it to the template's uv.lock itself",
-      );
-    }
     if (/^\s+(- )?uses:\s*["']?\.\//.test(line)) {
       refuse(line, "a local action is read from the repository root");
     }
@@ -160,14 +168,6 @@ export function renderTwin(template, file, source) {
     out.push(line);
     if (job && /^ {4}steps:\s*(#.*)?$/.test(line)) steps = { key: 4, dash: null };
     if (step && /^\s+(- )?uses:\s*["']?astral-sh\/setup-uv(?=[@"'\s]|$)/.test(line)) step.uv = line;
-    const enableCache = step && /^(\s+)enable-cache:(.*)$/.exec(line);
-    if (enableCache) {
-      step.enableCache = {
-        at: out.length - 1,
-        indent: enableCache[1],
-        on: scalar(enableCache[2]) !== "false",
-      };
-    }
     if (job && /^ {4}runs-on:/.test(line)) {
       if (!/^ {4}runs-on: *[^\s#]/.test(line)) refuse(line, "a runs-on value that is not inline");
       out.push("    defaults:", "      run:", `        working-directory: ${template}`);
@@ -176,7 +176,10 @@ export function renderTwin(template, file, source) {
     const cache = /^(\s+)(- )?cache:(.*)$/.exec(line);
     if (cache) {
       if (scalar(cache[3]) !== "npm") {
-        refuse(line, "only an npm cache is pointed at the template's lock file");
+        refuse(
+          line,
+          "only an npm cache is pointed at the template's lock file, whichever action takes it",
+        );
       }
       const indent = cache[1] + (cache[2] ? "  " : "");
       out.push(`${indent}cache-dependency-path: ${template}/package-lock.json`);

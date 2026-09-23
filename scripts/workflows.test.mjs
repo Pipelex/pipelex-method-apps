@@ -67,7 +67,7 @@ jobs:
         run: make agent-test
 `;
 
-const GLOB = "cache-dependency-glob: app-py/uv.lock";
+const WD = "working-directory: app-py";
 
 const roots = [];
 after(() => {
@@ -186,11 +186,8 @@ describe("renderTwin", () => {
 describe("renderTwin with setup-uv", () => {
   const twin = renderTwin("app-py", "tests-check.yml", UV_SOURCE);
 
-  it("points the uv cache at the template's lock file, after the line that turns it on", () => {
-    assert.match(
-      twin,
-      new RegExp(`\\n {10}enable-cache: true\\n {10}${GLOB}\\n {10}python-version:`),
-    );
+  it("runs setup-uv in the template, set as the first of its inputs", () => {
+    assert.match(twin, new RegExp(`\\n {8}with:\\n {10}${WD}\\n {10}enable-cache: true\\n`));
   });
 
   it("keeps everything else as it was", () => {
@@ -198,35 +195,35 @@ describe("renderTwin with setup-uv", () => {
     const stripped = body
       .replace(/ \(app-py\)$/gm, "")
       .replace(/\n {4}defaults:\n {6}run:\n {8}working-directory: app-py/, "")
-      .replace(`\n          ${GLOB}`, "");
+      .replace(`\n          ${WD}`, "");
     assert.equal(stripped, UV_SOURCE);
   });
 
-  it("points the cache at the lock whenever it may be on", () => {
-    for (const spelling of [
-      "enable-cache: 'true'",
-      'enable-cache: "auto"',
-      "enable-cache: auto # hosted runners only",
-      "enable-cache: ${{ github.event_name == 'pull_request' }}",
+  it("carries the step's own cache settings, which setup-uv reads inside the template", () => {
+    for (const source of [
+      UV_SOURCE.replace("          enable-cache: true\n", ""),
+      UV_SOURCE.replace("enable-cache: true", "enable-cache: false"),
+      UV_SOURCE.replace(
+        "          enable-cache: true",
+        "          enable-cache: true\n          cache-dependency-glob: |\n            uv.lock\n            pyproject.toml",
+      ),
     ]) {
-      const rendered = renderTwin(
-        "app-py",
-        "tests-check.yml",
-        UV_SOURCE.replace("enable-cache: true", spelling),
-      );
-      assert.ok(rendered.includes(`          ${spelling}\n          ${GLOB}\n`), spelling);
+      const rendered = renderTwin("app-py", "tests-check.yml", source);
+      assert.ok(rendered.includes(`        with:\n          ${WD}\n`), source);
     }
   });
 
-  it("adds nothing to a step whose cache is off", () => {
-    for (const spelling of ["enable-cache: false", 'enable-cache: "false" # no cache']) {
-      const rendered = renderTwin(
-        "app-py",
-        "tests-check.yml",
-        UV_SOURCE.replace("enable-cache: true", spelling),
-      );
-      assert.ok(!rendered.includes("cache-dependency-glob"), spelling);
-    }
+  it("matches the indentation of the step's inputs, past a comment", () => {
+    const deeper = UV_SOURCE.replace(
+      "          enable-cache: true\n          python-version",
+      "            # the cache is keyed on the template's files\n              enable-cache: true\n              python-version",
+    );
+    const rendered = renderTwin("app-py", "tests-check.yml", deeper);
+    assert.ok(
+      rendered.includes(
+        `# the cache is keyed on the template's files\n              ${WD}\n              enable-cache: true\n`,
+      ),
+    );
   });
 
   it("reads the whole step, whatever the order of its keys", () => {
@@ -238,42 +235,51 @@ describe("renderTwin with setup-uv", () => {
       "          python-version: ${{ matrix.python-version }}\n        uses: astral-sh/setup-uv@v7\n",
     );
     const rendered = renderTwin("app-py", "tests-check.yml", usesLast);
-    assert.match(rendered, new RegExp(`enable-cache: true\\n {10}${GLOB}\\n`));
+    assert.ok(rendered.includes(`        with:\n          ${WD}\n          enable-cache: true\n`));
   });
 
-  it("points every setup-uv step of every job at the lock", () => {
-    const twoJobs = `${UV_SOURCE}  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: astral-sh/setup-uv@v7\n        with:\n          enable-cache: true\n      - run: make check\n`;
+  it("reads a step whose dash stands alone on its line, and every step after it", () => {
+    const bare = UV_SOURCE.replace(
+      "      - uses: actions/checkout@v4",
+      "      -\n        uses: actions/checkout@v4",
+    ).replace(
+      "      - name: Set up uv\n",
+      "      - # uv, with the template's Python\n        name: Set up uv\n",
+    );
+    const rendered = renderTwin("app-py", "tests-check.yml", bare);
+    assert.ok(rendered.includes(`        with:\n          ${WD}\n`));
+    const alone = UV_SOURCE.replace(
+      "      - name: Set up uv\n        uses: astral-sh/setup-uv@v7\n        with:\n          enable-cache: true\n          python-version: ${{ matrix.python-version }}\n",
+      "      -\n        uses: astral-sh/setup-uv@v7\n",
+    );
+    assert.throws(() => renderTwin("app-py", "tests-check.yml", alone), TwinError);
+  });
+
+  it("runs every setup-uv step of every job in the template", () => {
+    const twoJobs = `${UV_SOURCE}  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: astral-sh/setup-uv@v7\n        with:\n          python-version: "3.13"\n      - run: make check\n`;
     const rendered = renderTwin("app-py", "tests-check.yml", twoJobs);
-    assert.equal(rendered.split(GLOB).length - 1, 2);
+    assert.equal(rendered.split(`with:\n          ${WD}\n`).length - 1, 2);
   });
 
-  it("leaves another action's enable-cache input alone", () => {
+  it("leaves another action's inputs alone", () => {
     const other = UV_SOURCE.replace("astral-sh/setup-uv@v7", "example/setup-tool@v1");
-    assert.ok(!renderTwin("app-py", "tests-check.yml", other).includes("cache-dependency-glob"));
+    const rendered = renderTwin("app-py", "tests-check.yml", other);
+    assert.ok(!rendered.includes(`with:\n          ${WD}`));
   });
 
-  it("refuses a uv cache it cannot point at the template's lock", () => {
+  it("refuses a setup-uv step it cannot run in the template", () => {
+    const withBlock =
+      "        with:\n          enable-cache: true\n          python-version: ${{ matrix.python-version }}\n";
     const cases = {
-      "a glob of its own": UV_SOURCE.replace(
-        "          enable-cache: true",
-        "          enable-cache: true\n          cache-dependency-glob: uv.lock",
-      ),
-      "a multi-line glob": UV_SOURCE.replace(
-        "          enable-cache: true",
-        "          enable-cache: true\n          cache-dependency-glob: |\n            **/uv.lock",
-      ),
-      "setup-uv's working directory": UV_SOURCE.replace(
+      "a working directory of its own": UV_SOURCE.replace(
         "          enable-cache: true",
         "          enable-cache: true\n          working-directory: app-py",
       ),
-      "a cache left to setup-uv's default": UV_SOURCE.replace("          enable-cache: true\n", ""),
-      "a step with no inputs": UV_SOURCE.replace(
-        "        uses: astral-sh/setup-uv@v7\n        with:\n          enable-cache: true\n          python-version: ${{ matrix.python-version }}\n",
-        "        uses: astral-sh/setup-uv@v7\n",
-      ),
-      "a quoted action": UV_SOURCE.replace(
-        "astral-sh/setup-uv@v7\n        with:\n          enable-cache: true\n",
-        '"astral-sh/setup-uv@v7"\n        with:\n',
+      "no with block": UV_SOURCE.replace(withBlock, ""),
+      "an empty with block": UV_SOURCE.replace(withBlock, "        with:\n"),
+      "a quoted action with no inputs": UV_SOURCE.replace(
+        "astral-sh/setup-uv@v7\n" + withBlock,
+        '"astral-sh/setup-uv@v7"\n',
       ),
       "the last step of the file": `${UV_SOURCE}      - uses: astral-sh/setup-uv@v7\n`,
     };
@@ -283,27 +289,18 @@ describe("renderTwin with setup-uv", () => {
     }
   });
 
-  it("names the key a refusal is about", () => {
-    assert.throws(
-      () =>
-        renderTwin(
-          "app-py",
-          "tests-check.yml",
-          UV_SOURCE.replace("          enable-cache: true\n", ""),
-        ),
-      /"uses: astral-sh\/setup-uv@v7": setup-uv caches by default: state enable-cache/,
-    );
+  it("names the line a refusal is about", () => {
     assert.throws(
       () =>
         renderTwin(
           "app-py",
           "tests-check.yml",
           UV_SOURCE.replace(
-            "          enable-cache: true",
-            "          enable-cache: true\n          cache-dependency-glob: uv.lock",
+            "        with:\n          enable-cache: true\n          python-version: ${{ matrix.python-version }}\n",
+            "",
           ),
         ),
-      /"cache-dependency-glob: uv\.lock": setup-uv reads cache-dependency-glob/,
+      /"uses: astral-sh\/setup-uv@v7": setup-uv reads its settings from its working directory/,
     );
   });
 });
