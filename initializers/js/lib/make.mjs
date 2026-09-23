@@ -14,6 +14,8 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 
+import { gitEnv } from "./git.mjs";
+
 /**
  * Variables through which an enclosing make would reach this one as if they
  * had been typed on its command line. The Makefile trusts only command-line
@@ -21,8 +23,15 @@ import fs from "node:fs";
  */
 const MAKE_CHANNELS = ["MAKEFLAGS", "MFLAGS", "MAKELEVEL", "MAKEOVERRIDES"];
 
+/**
+ * The environment `make create` runs in: without the make channels, and
+ * without the variables that point git elsewhere, which the initializer drops
+ * for its own git calls too. The copy's install wires its hooks with
+ * `git config`, which would otherwise write into the repository a caller's
+ * `GIT_DIR` names rather than the copy's.
+ */
 export function makeEnv(env) {
-  const clean = { ...env };
+  const clean = gitEnv(env);
   for (const name of MAKE_CHANNELS) delete clean[name];
   return clean;
 }

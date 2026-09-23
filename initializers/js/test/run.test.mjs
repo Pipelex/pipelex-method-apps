@@ -82,6 +82,22 @@ describe("a run", () => {
     assert.equal(record.sawKey, true);
   });
 
+  it("keeps a caller's GIT_DIR from make create, and from the repository it makes", async () => {
+    const { root, work } = workspace();
+    const theirs = path.join(root, "theirs");
+    fs.mkdirSync(theirs);
+    git(theirs, ["init", "-q"], runEnv(root));
+    const env = { ...runEnv(root), GIT_DIR: path.join(theirs, ".git") };
+    const { output, verdict } = await runInitializer(["app", "--method", "mt_1"], {
+      cwd: work,
+      env,
+    });
+    assert.equal(verdict, "created", output);
+    assert.equal(makeRecord(root).gitDir, "unset");
+    assert.equal(git(path.join(work, "app"), ["rev-list", "--count", "HEAD"], runEnv(root)), "1");
+    assert.equal(fs.readdirSync(path.join(theirs, ".git", "refs", "heads")).length, 0);
+  });
+
   it("makes a relative --method path absolute, and forwards anything else unchanged", async () => {
     const { root, work } = workspace();
     fs.mkdirSync(path.join(work, "methods"));

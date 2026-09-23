@@ -41,8 +41,8 @@ const REAL_GIT = execFileSync("sh", ["-c", "command -v git"], { encoding: "utf8"
 
 /**
  * A stand-in for `make`. It records its arguments (NUL-separated), the
- * directory it ran in, what reached it through MAKEFLAGS, and whether it saw a
- * key, then prints the way `make create` does, warnings included, each of the
+ * directory it ran in, what reached it through MAKEFLAGS and GIT_DIR, and
+ * whether it saw a key, then prints the way `make create` does, warnings included, each of the
  * bootstrap's twice, and exits with STUB_MAKE_EXIT.
  */
 const STUB_MAKE = `#!/bin/sh
@@ -50,6 +50,7 @@ record="$STUB_MAKE_RECORD"
 printf '%s\\0' "$@" > "$record.args"
 pwd -P > "$record.cwd"
 printf '%s\\n' "\${MAKEFLAGS-unset}" > "$record.makeflags"
+printf '%s\\n' "\${GIT_DIR-unset}" > "$record.gitdir"
 [ -n "$PIPELEX_API_KEY" ] && echo present > "$record.key"
 echo "create: Stub Method"
 echo ""
@@ -143,6 +144,7 @@ export function makeRecord(root) {
     args: read(".args").split("\0").slice(0, -1),
     cwd: read(".cwd").trim(),
     makeflags: read(".makeflags").trim(),
+    gitDir: read(".gitdir").trim(),
     sawKey: read(".key") !== null,
   };
 }
