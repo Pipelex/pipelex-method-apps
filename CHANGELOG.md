@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **The release publishes with npm 11**: the release job installed the latest npm, whose 12.x changed the report `npm pack --json` prints and failed the initializer's package test before anything was published. It now installs npm 11, the npm the pull request checks also run, and the package test lists the packed tarball itself rather than reading npm's report.
+
 ## [v0.4.0] - 2026-09-23
 
 ### Highlights
