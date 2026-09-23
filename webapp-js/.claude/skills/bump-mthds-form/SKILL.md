@@ -21,7 +21,7 @@ Show the user:
 4. Working tree status (`git status --short`)
 5. Whether either package is a local tarball: `make local-status` (see this repo's `CLAUDE.md` § "Local package development"). The installed version cannot answer this, because a local build carries the version it will be published as.
 
-**If `make local-status` reports `local`**, a bump should target the _published_ package, not whatever's on disk from local development — tell the user and offer `make use-npm-form` first (or `make use-npm` when the SDK is local too, since the kernel-only target refuses then). Both restore the version the lockfile pins and rewrite nothing, so the baseline they give is the one this bump moves from.
+**If `make local-status` reports `local`**, a bump should target the _published_ package, not whatever's on disk from local development — tell the user and offer `make use-published-form` first (or `make use-published` when the SDK is local too, since the kernel-only target refuses then). Both restore the version the lockfile pins and rewrite nothing, so the baseline they give is the one this bump moves from.
 
 If the working tree is dirty, don't stop — this repo's checks (`make all`) don't require a clean tree — but note it, since the diff you produce at the end will sit alongside whatever else is already staged/unstaged. Ask before touching `package.json`/`package-lock.json` if either is already dirty, since your edit will land on top of unrelated in-flight changes to the same files.
 

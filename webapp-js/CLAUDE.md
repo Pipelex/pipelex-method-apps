@@ -333,36 +333,36 @@ Enforced via Husky + lint-staged on commit.
 
 ## Scripts (via Make)
 
-| Target                | Purpose                                                                                                     |
-| --------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `make dev`            | Start the Next.js dev server                                                                                |
-| `make build`          | Production build                                                                                            |
-| `make lint`           | ESLint                                                                                                      |
-| `make format`         | Prettier write                                                                                              |
-| `make format-check`   | Prettier check (CI)                                                                                         |
-| `make typecheck`      | `tsc --noEmit` (app) + `tsc -p tsconfig.e2e.json` (e2e) + `tsc -p tsconfig.scripts.json`                    |
-| `make codegen`        | Regenerate `src/generated/` from `methods/` (needs `PIPELEX_API_KEY`; **not** in `make all`)                |
-| `make codegen-check`  | Prove `src/generated/` is current — offline, no key. Part of `make check`                                   |
-| `make codegen-verify` | Ask the engine whether the committed crates are still current (needs a key; not in `make all`)              |
-| `make add-method`     | Scaffold a method into the app — `METHOD=<bundle path \| mt_… \| address>` (needs a key)                    |
-| `make test`           | Vitest single pass                                                                                          |
-| `make agent-test`     | Vitest, silent on success (preferred for AI agents)                                                         |
-| `make test-e2e`       | Optional Playwright e2e (live specs cost an LLM call; prompts first, auto-skip without a key)               |
-| `make check`          | lint + format-check + typecheck + codegen-check                                                             |
-| `make all`            | check + test + build (does **not** include e2e, `codegen`, or `codegen-verify`)                             |
-| `make use-local`      | Pack and install siblings `../pipelex-sdk-js` + `../mthds-form`, or from `SIBLINGS_DIR=<dir>` (alias: `ul`) |
-| `make use-local-form` | Pack and install sibling `../mthds-form` alone, or from `SIBLINGS_DIR=<dir>`                                |
-| `make use-npm`        | Restore the `@pipelex/sdk` + `@pipelex/mthds-form` versions the lockfile pins (alias: `un`)                 |
-| `make use-npm-form`   | Restore the `@pipelex/mthds-form` version the lockfile pins                                                 |
-| `make local-status`   | Say whether each package comes from a sibling checkout or from npm                                          |
+| Target                    | Purpose                                                                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `make dev`                | Start the Next.js dev server                                                                                |
+| `make build`              | Production build                                                                                            |
+| `make lint`               | ESLint                                                                                                      |
+| `make format`             | Prettier write                                                                                              |
+| `make format-check`       | Prettier check (CI)                                                                                         |
+| `make typecheck`          | `tsc --noEmit` (app) + `tsc -p tsconfig.e2e.json` (e2e) + `tsc -p tsconfig.scripts.json`                    |
+| `make codegen`            | Regenerate `src/generated/` from `methods/` (needs `PIPELEX_API_KEY`; **not** in `make all`)                |
+| `make codegen-check`      | Prove `src/generated/` is current — offline, no key. Part of `make check`                                   |
+| `make codegen-verify`     | Ask the engine whether the committed crates are still current (needs a key; not in `make all`)              |
+| `make add-method`         | Scaffold a method into the app — `METHOD=<bundle path \| mt_… \| address>` (needs a key)                    |
+| `make test`               | Vitest single pass                                                                                          |
+| `make agent-test`         | Vitest, silent on success (preferred for AI agents)                                                         |
+| `make test-e2e`           | Optional Playwright e2e (live specs cost an LLM call; prompts first, auto-skip without a key)               |
+| `make check`              | lint + format-check + typecheck + codegen-check                                                             |
+| `make all`                | check + test + build (does **not** include e2e, `codegen`, or `codegen-verify`)                             |
+| `make use-local`          | Pack and install siblings `../pipelex-sdk-js` + `../mthds-form`, or from `SIBLINGS_DIR=<dir>` (alias: `ul`) |
+| `make use-local-form`     | Pack and install sibling `../mthds-form` alone, or from `SIBLINGS_DIR=<dir>`                                |
+| `make use-published`      | Restore the `@pipelex/sdk` + `@pipelex/mthds-form` versions the lockfile pins (alias: `un`)                 |
+| `make use-published-form` | Restore the `@pipelex/mthds-form` version the lockfile pins                                                 |
+| `make local-status`       | Say whether each package comes from a sibling checkout or from npm                                          |
 
 ## Local package development (`use-local`)
 
-When working on this app alongside the SDK or the form kernel, use `make use-local` to install the siblings `../pipelex-sdk-js` and `../mthds-form` into `node_modules/@pipelex/sdk` and `node_modules/@pipelex/mthds-form` instead of the npm packages, or `make use-local-form` to install the kernel alone. The siblings are looked for in the parent directory, and `SIBLINGS_DIR=<dir>` names another one. The target builds each sibling, packs it with `npm pack` into a temporary directory, then installs the tarballs — in **one** `npm install` call, deliberately: an `--no-save` install re-reconciles `node_modules` against the lockfile and silently puts any earlier tarball back on the registry version. For the same reason `make use-local-form` and `make use-npm-form` refuse to run while the SDK is local, and name `make use-local` or `make use-npm`, which switch both.
+When working on this app alongside the SDK or the form kernel, use `make use-local` to install the siblings `../pipelex-sdk-js` and `../mthds-form` into `node_modules/@pipelex/sdk` and `node_modules/@pipelex/mthds-form` instead of the npm packages, or `make use-local-form` to install the kernel alone. The siblings are looked for in the parent directory, and `SIBLINGS_DIR=<dir>` names another one. The target builds each sibling, packs it with `npm pack` into a temporary directory, then installs the tarballs — in **one** `npm install` call, deliberately: an `--no-save` install re-reconciles `node_modules` against the lockfile and silently puts any earlier tarball back on the registry version. For the same reason `make use-local-form` and `make use-published-form` refuse to run while the SDK is local, and name `make use-local` or `make use-published`, which switch both.
 
 We use a tarball install rather than a symlink (`ln -s`) because Next.js 16's Turbopack does not follow symlinked workspace packages — both `npm run dev` and `npm run build` fail with `Module not found: Can't resolve '@pipelex/sdk'` against a symlinked entry. **Re-run `make use-local` after every edit to either sibling** to pick up changes.
 
-`make use-npm` switches back, and `make use-npm-form` switches the kernel alone. Both install the version `package-lock.json` pins, `--no-save`, so leaving local mode never rewrites `package.json` or the lockfile: moving a range is a reviewed change with a changelog to read, which is what the `/bump-mthds-form` and `/bump-sdk` skills are for. A newer release published while you worked locally therefore does not arrive by switching back.
+`make use-published` switches back, and `make use-published-form` switches the kernel alone. Both install the version `package-lock.json` pins, `--no-save`, so leaving local mode never rewrites `package.json` or the lockfile: moving a range is a reviewed change with a changelog to read, which is what the `/bump-mthds-form` and `/bump-sdk` skills are for. A newer release published while you worked locally therefore does not arrive by switching back.
 
 `make local-status` says which mode `node_modules` is in, package by package. The version cannot tell you, because a local build carries the version it will be published as, so the target reads where npm's hidden lockfile (`node_modules/.package-lock.json`) says each package was installed from.
 

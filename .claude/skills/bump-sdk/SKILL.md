@@ -26,7 +26,7 @@ node -p "require('./<template>/node_modules/@pipelex/sdk/package.json').version"
 
 Then, once, the latest published version: `npm view @pipelex/sdk version`.
 
-- **`make local-status` reports a package as `local`**: the template is running a tarball packed from the workspace's `pipelex-sdk-js` checkout, which a bump must not be measured against — and the version cannot show it, since a local build carries the version string it will be published as. `make use-npm` at the root restores both `@pipelex` packages at the versions each lockfile pins, and rewrites no manifest, so the baseline it gives is the one this bump moves from.
+- **`make local-status` reports a package as `local`**: the template is running a tarball packed from the workspace's `pipelex-sdk-js` checkout, which a bump must not be measured against — and the version cannot show it, since a local build carries the version string it will be published as. `make use-published` at the root restores both `@pipelex` packages at the versions each lockfile pins, and rewrites no manifest, so the baseline it gives is the one this bump moves from.
 - **The templates are on different versions**: they move to one version together here, and the lowest of them sets where the changelog reading in Step 3 starts.
 - **Every template is already on the latest**: say so and stop, unless the user named another version.
 
