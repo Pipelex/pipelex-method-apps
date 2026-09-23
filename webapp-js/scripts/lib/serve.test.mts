@@ -3,7 +3,8 @@
 // `make serve` and `make stop`, each case against a fake dev server: a process
 // that forks a child to listen, as `next dev` forks `next-server`, so that
 // stopping "the server" is proven to stop everything it started. Every case
-// runs in a checkout of its own, on ports found free, with the real lsof.
+// runs in a checkout of its own, on ports found free, with the real lsof, and
+// the cases that need lsof are skipped where there is none.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
@@ -40,6 +41,11 @@ import {
 
 // Each case spawns servers and waits on lsof, which is slow on a busy machine.
 const SPAWNS = { timeout: 60_000 };
+
+// The cases that start a server read the real lsof. A slim Linux image may not
+// ship it, and `make all` must stay green there, so those cases are skipped
+// where it is missing; the refusal `make serve` gives there is tested anyway.
+const HAS_LSOF = spawnSync("lsof", ["-v"], { stdio: "ignore" }).error === undefined;
 
 const TEMPLATE_DEV = "next dev -H ${APP_HOST:-127.0.0.1} -p ${APP_PORT:-4300}";
 
@@ -352,7 +358,7 @@ describe("what is refused or answered before a server is looked for", () => {
   });
 });
 
-describe("make serve", SPAWNS, () => {
+describe.skipIf(!HAS_LSOF)("make serve", SPAWNS, () => {
   it("starts the server, proves its page, and reports it once", async () => {
     const checkout = checkoutWith();
     const ports = await freePorts(2);
@@ -551,11 +557,12 @@ describe("make serve", SPAWNS, () => {
     });
     await listening(ports[1]);
 
-    // Reached through a symlink, and on macOS in another letter case: the
-    // system reports the server's directory as the disk spells it.
+    // Reached through a symlink, and, where the disk ignores letter case as
+    // macOS's does by default, in another case: the system reports the
+    // server's directory as the disk spells it.
     const link = path.join(tempDir("serve-link-"), "checkout");
     symlinkSync(checkout, link);
-    const spelled = process.platform === "darwin" ? link.toUpperCase() : link;
+    const spelled = existsSync(link.toUpperCase()) ? link.toUpperCase() : link;
     const config = configFor(spelled, "ok", ports);
 
     const result = await run(serve, config);
@@ -586,7 +593,7 @@ describe("make serve", SPAWNS, () => {
   });
 });
 
-describe("make stop", SPAWNS, () => {
+describe.skipIf(!HAS_LSOF)("make stop", SPAWNS, () => {
   it("never signals a recorded group that no longer runs in this checkout", async () => {
     const checkout = checkoutWith();
     const elsewhere = tempDir("serve-recycled-");
@@ -639,7 +646,7 @@ describe("make stop", SPAWNS, () => {
   });
 });
 
-describe("the command that started it", SPAWNS, () => {
+describe.skipIf(!HAS_LSOF)("the command that started it", SPAWNS, () => {
   const LIB = path.join(import.meta.dirname, "serve.mts");
 
   /** Run serve in a process of its own, as `make serve` does, and hand it back. */
