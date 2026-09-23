@@ -226,8 +226,7 @@ clean: ## Remove build artifacts and caches
 # the sibling pipelex-sdk-js and mthds-form checkouts so you can develop them
 # and the app side-by-side, and `make use-local-form` does the same for the form
 # kernel alone. `make use-published` and `make use-published-form` switch back,
-# and `make local-status` says which mode node_modules is in. The names are the
-# family's, shared with templates whose registry is not npm.
+# and `make local-status` says which mode node_modules is in.
 #
 # The siblings are looked for in the parent directory. SIBLINGS_DIR=<dir> names
 # another one — `../..` for a checkout nested one level deeper than its
