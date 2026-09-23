@@ -8,25 +8,20 @@ Looking for worked examples instead? [`pipelex-starter-js`](https://github.com/P
 
 ## Use this template
 
-This template is the `webapp-js/` directory of the [`pipelex-method-apps`](https://github.com/Pipelex/pipelex-method-apps) repository, which holds one template per shape and language. A project starts as a copy of this directory alone. Copy it into a new directory, make that a repository, and run one command with the method you have:
+This template is the `webapp-js/` directory of the [`pipelex-method-apps`](https://github.com/Pipelex/pipelex-method-apps) repository, which holds one template per shape and language. A project starts as a copy of this directory alone. The family's initializer writes it into a new directory, commits it as it came, and runs `make create` there with the method you have:
 
 ```bash
-src=$(mktemp -d)
-git clone --depth 1 https://github.com/Pipelex/pipelex-method-apps.git "$src"
-mkdir -p my-app && cp -R "$src/webapp-js/." my-app/    # my-app/ is new or empty
-cd my-app && git init
-
 export PIPELEX_API_KEY=…                               # from app.pipelex.com
 export PIPELEX_BASE_URL=https://api-dev.pipelex.com    # for now — see below
-make create METHOD=path/to/my_method.mthds
-make dev                                               # http://127.0.0.1:4300, in this terminal
+npm create @pipelex/method-app@latest my-app -- --method path/to/my_method.mthds
+make -C my-app serve                                   # the URL, once the page answers
 ```
 
-`make serve` starts the same server in the background instead, prints its URL once the page answers, and `make stop` stops it.
+`make serve` starts the dev server in the background, prints its URL once the page answers, and `make stop` stops it; `make dev` runs the same server in this terminal instead, on http://127.0.0.1:4300. The initializer's [README](https://github.com/Pipelex/pipelex-method-apps/tree/main/initializers/js#readme) lists its options, one per `make create` variable below.
 
-`METHOD` is a `.mthds` file or a directory of them, a method id from your organization's catalog (`mt_…`, from [app.pipelex.com](https://app.pipelex.com)), or a published package address (`github.com/Pipelex/methods/text_stats@v0.1.1`).
+`--method`, which the initializer hands to `make create` as `METHOD`, is a `.mthds` file or a directory of them, a method id from your organization's catalog (`mt_…`, from [app.pipelex.com](https://app.pipelex.com)), or a published package address (`github.com/Pipelex/methods/text_stats@v0.1.1`).
 
-`make create` scaffolds the method, names the project after it (the package name, the title and the description all come from the method, and `NAME=`, `TITLE=` and `DESCRIPTION=` override them), writes `.env.local` from your shell, and runs `make all`. It commits nothing, so `git diff` shows everything it did. `DRY_RUN=1` prints the plan first. [`docs/create.md`](docs/create.md) is the reference.
+`make create` scaffolds the method, names the project after it (the package name, the title and the description all come from the method, and `--name`, `--title` and `--description` override them, which are `NAME=`, `TITLE=` and `DESCRIPTION=` to `make create` itself), writes `.env.local` from your shell, and runs `make all`. It commits nothing, so `git diff` against the initializer's pristine commit shows everything it did. `--dry-run` (`DRY_RUN=1`) prints the plan first. [`docs/create.md`](docs/create.md) is the reference.
 
 To choose every value yourself instead, open the repository in [Claude Code](https://claude.com/claude-code), run `/bootstrap`, then `make add-method METHOD=…`.
 

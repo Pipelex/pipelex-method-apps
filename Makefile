@@ -15,6 +15,13 @@ TEMPLATES := webapp-js
 FORM_TEMPLATES := webapp-js
 $(if $(filter-out $(TEMPLATES),$(FORM_TEMPLATES)),$(error FORM_TEMPLATES names $(filter-out $(TEMPLATES),$(FORM_TEMPLATES)), which TEMPLATES does not))
 
+# The family's initializers, each a package that writes the templates of its
+# ecosystem into a new project (docs/family.md, "The initializers"). They are
+# not templates: no project is a copy of one, so no template target runs in
+# them, but each carries the family's version and its tests run with the
+# root's.
+INITIALIZERS := initializers/js
+
 # The root's own tooling borrows the first template's installed Prettier and
 # Husky, so the root needs no package manager of its own.
 TOOLS := webapp-js/node_modules/.bin
@@ -51,12 +58,12 @@ hooks: ## Wire the root pre-commit hook, which runs each template's own
 check: check-family ## Check the family, then run every template's check (lint, format, typecheck, codegen)
 	$(call each,check)
 
-check-family: check-versions check-workflows ## Check what belongs to the family: its version, the workflow twins, the root's formatting
+check-family: check-versions check-workflows ## Check what belongs to the family: its version, the workflow twins, the root's formatting (initializers included)
 	@[ -x $(TOOLS)/prettier ] || { echo "Prettier is not installed: run make install first."; exit 1; }
 	$(TOOLS)/prettier --check $(ROOT_FORMATTED)
 
-check-versions: ## Check that every template carries the version in VERSION
-	@node scripts/versions.mjs $(TEMPLATES)
+check-versions: ## Check that every template and initializer carries the version in VERSION
+	@node scripts/versions.mjs $(TEMPLATES) $(INITIALIZERS)
 
 check-workflows: ## Check that the root twin of every template workflow is current
 	@node scripts/workflows.mjs --check $(TEMPLATES)
@@ -78,14 +85,17 @@ format-check: ## Check the formatting of the root's own files, then every templa
 typecheck: ## Run every template's type checks
 	$(call each,typecheck)
 
-test-family: ## Run the tests of the root's own scripts
-	node --test "scripts/*.test.mjs"
+# The root's scripts and every initializer, each suite in its own test file.
+FAMILY_TESTS := "scripts/*.test.mjs" $(foreach i,$(INITIALIZERS),"$(i)/test/*.test.mjs")
+
+test-family: ## Run the tests of the root's own scripts and of every initializer
+	node --test $(FAMILY_TESTS)
 
 test: test-family ## Run the family's tests, then every template's
 	$(call each,test)
 
 agent-test: ## Run every test, silent on success (for agents)
-	@OUTPUT=$$(node --test "scripts/*.test.mjs" 2>&1); STATUS=$$?; if [ $$STATUS -ne 0 ]; then echo "$$OUTPUT"; exit $$STATUS; fi
+	@OUTPUT=$$(node --test $(FAMILY_TESTS) 2>&1); STATUS=$$?; if [ $$STATUS -ne 0 ]; then echo "$$OUTPUT"; exit $$STATUS; fi
 	$(call each,agent-test)
 
 build: ## Build every template
