@@ -28,7 +28,18 @@ The merge to `main` publishes, through `.github/workflows/release.yml`, which fi
 
 No template is published: every template's manifest is private (`webapp-js/package.json` declares `"private": true`), and a template reaches a project through the initializer. There is no GitHub Release.
 
-The first publish of `@pipelex/create-method-app` needed its trusted publisher configured on npm by a person holding the owner role on `@pipelex`, against this repository and `release.yml`; a failing publish step on a later release that names authentication means that configuration changed.
+**The first release publishes by hand, once.** npm configures a trusted publisher only on a package that already exists, and `@pipelex/create-method-app` does not exist until its first release, so that release's run asserts the changelog, packs the templates and runs the tests, then fails at `npm publish` on authentication, having published nothing and tagged nothing. A person holding the owner role on `@pipelex` then publishes that version from a fresh clone standing on the release merge commit, and configures the trust. It must be a clone and not a worktree, because npm reads the `gitHead` it records from a `.git` directory and records none from a worktree's `.git` file:
+
+```bash
+git clone -q https://github.com/Pipelex/pipelex-method-apps.git <tmp>/first-publish
+git -C <tmp>/first-publish checkout -q --detach <the release merge SHA>
+cd <tmp>/first-publish/initializers/js && npm publish --access public --provenance=false   # prepack packs with --publish
+npm view @pipelex/create-method-app gitHead                                              # the release merge SHA
+npm trust github @pipelex/create-method-app --file release.yml --repo Pipelex/pipelex-method-apps
+gh run rerun <the failed run's id> --failed --repo Pipelex/pipelex-method-apps
+```
+
+`--provenance=false` overrides `publishConfig`, which asks for a provenance only a CI run can produce, so the first version carries none. The re-run finds the version on npm, skips to the tag and puts it on the `gitHead` npm recorded. Every later release publishes through the workflow, with provenance; a failing publish step on a later release that names authentication means the trust changed, which `npm trust list @pipelex/create-method-app` shows.
 
 The landing verifies the publish — the run, the registry's answer, the tag:
 

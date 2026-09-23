@@ -85,7 +85,9 @@ jobs:
 
       # --ignore-scripts skips `prepack`, so the packs published are the ones
       # the step above made and the tests read. Provenance is npm's own and is
-      # unaffected.
+      # unaffected. The first release fails here, since npm trusts a publisher
+      # only for a package that exists: the release skill says how a person
+      # publishes it once by hand.
       - name: Publish to npm
         id: publish
         if: steps.published.outputs.already == 'false'
