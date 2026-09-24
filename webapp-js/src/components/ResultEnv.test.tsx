@@ -139,8 +139,8 @@ describe("ResultEnv — the URLs a run's payload can reach", () => {
   });
 
   it("hands a browser no data:text/html document, whatever its filename claims", () => {
-    // A `data:` document inherits the embedding page's origin, so framing this
-    // one would run its script with this app's cookies.
+    // A `data:` document gets an opaque origin, so it cannot reach this app's cookies or
+    // DOM, but framed unsandboxed it would run its script and draw its own UI in the page.
     const { container } = renderResult(DOCUMENT_FIELD, {
       url: "data:text/html,<script>parent.document.title='owned'</script>",
       filename: "report.pdf",
