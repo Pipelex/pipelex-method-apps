@@ -21,9 +21,10 @@
  *
  * A project does not inherit what only the template needs. The files of that
  * kind are removed whole (`REMOVALS`: the `make create` gesture with its test
- * and its doc, and the tile e2e with its fixture), and the passages of shared
- * files that describe them sit between `template-only:begin` and
- * `template-only:end` markers, which are removed with everything between them.
+ * and its doc, the tile e2e with its fixture, and the chrome lineage), and the
+ * passages of shared files that describe them sit between `template-only:begin`
+ * and `template-only:end` markers, which are removed with everything between
+ * them.
  *
  * Every file it writes goes through the repo's own Prettier when Prettier is
  * installed, so `make all` is green straight after a run. The script only
@@ -67,6 +68,12 @@ const CHARTER_MARKER = "This directory is a **template**.";
 // its controls leave the accessibility tree and the spec's first `fill` times
 // out, after paying for an `npm ci` and a dev-server boot. The spec proves the
 // TEMPLATE, and it belongs to the template alone.
+//
+// The chrome lineage governs the template's relation to the gallery it was
+// extracted from: which changes to the code they share owe the other a port,
+// and what the extraction took. A project has no such relation, and the
+// document would only send its agent to file tasks against a repository it has
+// nothing to do with.
 export const REMOVALS = [
   "scripts/create.mts",
   "scripts/lib/create.mts",
@@ -74,6 +81,7 @@ export const REMOVALS = [
   "docs/create.md",
   "e2e/resultTile.spec.ts",
   "e2e/fixtures/generate-image",
+  "docs/chrome-lineage.md",
 ];
 
 // The npm script of the gesture REMOVALS takes away.
@@ -460,6 +468,7 @@ export const TARGETS = [
   },
   { rel: "Makefile", transform: (text) => stripTemplateOnly(text, "Makefile") },
   { rel: "docs/ci.md", transform: (text) => stripTemplateOnly(text, "docs/ci.md") },
+  { rel: "docs/input-form.md", transform: (text) => stripTemplateOnly(text, "docs/input-form.md") },
   { rel: "LICENSE", transform: (text, _names, opts) => transformLicense(text, opts) },
   { rel: "CHANGELOG.md", transform: (text, _names, opts) => resetChangelog(text, opts) },
   { rel: "src/site.ts", transform: transformSite },
