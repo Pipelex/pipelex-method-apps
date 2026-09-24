@@ -4,6 +4,7 @@
 
 ### Added
 
+- **A hydration signal for a script driving the app**: the web app template sets `html[data-hydrated]` once React has hydrated the page, and its `CLAUDE.md` tells a browser script to wait for it before its first screenshot, `fill` or `setInputFiles`. A Playwright screenshot taken earlier hides the caret by rewriting every input's inline style, which `next dev` then reports as a hydration mismatch with a "1 Issue" badge, and a file set earlier never reaches the handler that uploads it. The guidance says how to recognise that diff as the script's rather than the app's, and the offline e2e spec now waits for the signal and fails on any hydration error.
 - **A guide to writing a result view of the method's own**: the web app template's `docs/result-view.md` says where a bespoke view goes, why it takes the typed output rather than the payload, how to label enum values, format numbers and render Markdown, and how files keep the app's URL policy. The form `make add-method` writes points at it.
 
 ### Changed

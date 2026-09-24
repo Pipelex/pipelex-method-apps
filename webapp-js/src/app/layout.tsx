@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { HydrationMark } from "@/components/HydrationMark";
 import { ResultEnv } from "@/components/ResultEnv";
 import { SITE } from "@/site";
 // The shadcn semantic tokens the form kernel's controls are written against —
@@ -20,6 +21,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           assets route. See `src/components/ResultEnv.tsx`. */}
       <body className="antialiased">
         <ResultEnv>{children}</ResultEnv>
+        {/* Sets `html[data-hydrated]` once the page is live, for a browser
+            script to wait on. See `src/components/HydrationMark.tsx`. */}
+        <HydrationMark />
       </body>
     </html>
   );

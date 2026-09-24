@@ -237,6 +237,8 @@ test("the image tile paints through the assets route, and the cost panel labels 
 
   await page.goto(`${baseUrl}/`, { timeout: NAV_TIMEOUT_MS });
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  // Act only once the page is live: before hydration the form has no handlers.
+  await page.waitForSelector("html[data-hydrated]");
 
   // The form is the kernel's, so the control is reached by role and the
   // humanized name of the method's own input (`image_prompt`).
