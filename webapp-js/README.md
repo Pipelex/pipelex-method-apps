@@ -40,11 +40,11 @@ The command refuses rather than overwriting a slice that already exists, and `DR
 
 ## How it works
 
-1. A form renders the method's inputs from its committed input-form descriptor with `@pipelex/mthds-form`, and calls the `useRun` hook, which dispatches to the Server Actions for the chosen mode.
-2. The Server Action gates the inputs against the same committed contract — a Server Action is a public endpoint, so the browser's check is only UX — and checks any file reference's scheme, type and size.
+1. A form renders the method's inputs from its committed input-form descriptor with `@pipelex/mthds-form`. A file the user drops is stored at once, straight from the browser to Pipelex storage with an upload grant the method's Server Action asks for, and the form keeps its reference. The form then calls the `useRun` hook, which dispatches to the Server Actions for the deployment's execution mode.
+2. The Server Action gates the inputs against the same committed contract — a Server Action is a public endpoint, so the browser's check is only UX — and checks that every file position holds a reference it accepts.
 3. The SDK runs the method: `execute` in **Blocking** mode, or `start` and a poll loop in **Durable** mode, the default, which survives the hosted gateway's ~30s synchronous cap and streams live status.
 4. A narrower validates the main output against the zod schema generated from the method's contract.
-5. `<RunResult>` renders the validated output from the method's output-form descriptor, or `<ErrorDisplay>` shows a classified error. A file the run produced is streamed from the app's own origin through `/api/assets/…`, so the store's signed link is never what the browser fetches (the run's JSON receipt still carries it for a reader who opens that view), and `<CostReport>` shows what the run consumed.
+5. `<RunResult>` renders the validated output from the method's output-form descriptor, or `<ErrorDisplay>` shows a classified error. A file the run produced is streamed from the app's own origin through `/api/assets/…`, so the store's signed link is never what the browser fetches (the run's JSON receipt still carries it for a reader who opens that view), and `<RunDetails>` shows the run's id with a Copy button, and what the run consumed behind a closed "Usage and cost" disclosure.
 
 [`docs/input-form.md`](docs/input-form.md) covers the forms and result views, and [`docs/codegen.md`](docs/codegen.md) covers the generated types and the checks that keep them current.
 
@@ -55,11 +55,11 @@ The command refuses rather than overwriting a slice that already exists, and `DR
 
 ## Environment variables
 
-| Variable                     | Purpose                                                                                           | Default                   |
-| ---------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------- |
-| `PIPELEX_API_KEY`            | Bearer token used by the SDK                                                                      | (required at runtime)     |
-| `PIPELEX_BASE_URL`           | Pipelex API base URL                                                                              | `https://api.pipelex.com` |
-| `NEXT_PUBLIC_EXECUTION_MODE` | Default execution mode for every method — `durable` or `blocking`. Each method also has a toggle. | `durable`                 |
+| Variable                     | Purpose                                                                               | Default                   |
+| ---------------------------- | ------------------------------------------------------------------------------------- | ------------------------- |
+| `PIPELEX_API_KEY`            | Bearer token used by the SDK                                                          | (required at runtime)     |
+| `PIPELEX_BASE_URL`           | Pipelex API base URL                                                                  | `https://api.pipelex.com` |
+| `NEXT_PUBLIC_EXECUTION_MODE` | Execution mode for every method — `durable` or `blocking`. The page offers no switch. | `durable`                 |
 
 **`make create`, `make add-method`, `npm run codegen` and `npm run codegen:verify` currently need `PIPELEX_BASE_URL=https://api-dev.pipelex.com`.** `api.pipelex.com` does not yet serve the form views codegen asks for, nor the `method_ref` selector a package address needs. Each script names the missing capability rather than failing obscurely. `make all` needs neither a key nor a network.
 

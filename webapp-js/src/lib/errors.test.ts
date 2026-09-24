@@ -18,8 +18,10 @@ import {
 import { BadPipelineOutputError } from "@/types/pipelineError";
 import {
   buildClientTimeoutError,
+  buildInputsTooLargeError,
   classifyPipelineError,
   classifyTransportError,
+  classifyUploadError,
   type ClassifyEnv,
 } from "./errors";
 
@@ -365,11 +367,13 @@ describe("classifyPipelineError — unknown fallback", () => {
 });
 
 describe("classifyPipelineError — run-lifecycle errors", () => {
-  it("classifies PipelineExecuteTimeoutError into execute_timeout pointing at Durable mode", () => {
+  it("classifies PipelineExecuteTimeoutError into execute_timeout, pointing the deployment at durable runs", () => {
     const result = classifyPipelineError(new PipelineExecuteTimeoutError(31_000), OVERRIDE_ENV);
     expect(result.kind).toBe("execute_timeout");
     expect(result.title).toMatch(/30s/);
-    expect(result.hint?.summary).toMatch(/Durable/i);
+    // The page has no mode switch: the remedy is the deployment's variable.
+    expect(result.hint?.summary).not.toMatch(/Switch to Durable mode/);
+    expect(result.hint?.code).toBe("NEXT_PUBLIC_EXECUTION_MODE=durable");
   });
 
   it("maps a blocking-path 502/504 gateway response to execute_timeout", () => {
@@ -511,12 +515,58 @@ describe("classifyPipelineError — input-preparation (upload) errors", () => {
   });
 });
 
+describe("classifyUploadError — a file's upload, in the browser", () => {
+  it.each([
+    ["grant_expired", /permission ran out/i, /expired/],
+    ["grant_used", /permission ran out/i, /already been used/],
+    ["signature_mismatch", /changed before it was stored/i, /no longer matches/],
+    ["too_large", /too large/i, /size limit/],
+  ] as const)("says what a storage refusal coded %s means", (code, title, message) => {
+    const err = new RejectedAssetError("refused", "receipt.jpg", 403, { code });
+    const result = classifyUploadError(err);
+    expect(result.kind).toBe("upload_failed");
+    expect(result.title).toMatch(title);
+    expect(result.message).toMatch(message);
+    expect(result.message).toContain("receipt.jpg");
+    expect(result.details).toContain(`code: ${code}`);
+  });
+
+  it("names storage, not this app's server, when storage cannot be reached", () => {
+    const result = classifyUploadError(new UploadTransportError("could not reach storage"));
+    expect(result.kind).toBe("upload_failed");
+    expect(result.title).toBe("Could not reach Pipelex storage");
+  });
+
+  it("says an upload ran out of time when its own time limit fired", () => {
+    const result = classifyUploadError(new DOMException("signal timed out", "TimeoutError"));
+    expect(result.kind).toBe("upload_failed");
+    expect(result.title).toBe("The upload took too long");
+  });
+
+  it("treats anything else as the grant request failing to reach this app", () => {
+    const result = classifyUploadError(new TypeError("Failed to fetch"));
+    expect(result.kind).toBe("transport_error");
+  });
+});
+
 describe("buildClientTimeoutError", () => {
   it("builds a run_timeout error from the client poll ceiling", () => {
     const result = buildClientTimeoutError(150_000);
     expect(result.kind).toBe("run_timeout");
     expect(result.title).toMatch(/Stopped waiting/i);
     expect(result.message).toContain("150s");
+  });
+});
+
+describe("buildInputsTooLargeError", () => {
+  it("says how large the inputs are and what the limit is, and that files do not count", () => {
+    const result = buildInputsTooLargeError(1_534_000, 1_000_000);
+    expect(result.kind).toBe("inputs_too_large");
+    expect(result.title).toMatch(/too large/i);
+    expect(result.message).toContain("1.5 MB");
+    expect(result.message).toContain("at most 1 MB");
+    expect(result.message).toMatch(/Files don't count/);
+    expect(result.details).toBe("inputs_too_large: 1534000 bytes, limit 1000000 bytes");
   });
 });
 

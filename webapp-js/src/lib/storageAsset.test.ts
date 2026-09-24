@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { assetPath, isStorageUri, storageUriFromSegments } from "./storageAsset";
+import { assetPath, isStorageUri, resolveStoredFile, storageUriFromSegments } from "./storageAsset";
 
 describe("assetPath", () => {
   it("maps a storage reference onto the assets route, keeping the object's path and extension", () => {
@@ -29,6 +29,18 @@ describe("assetPath", () => {
     expect(assetPath("pipelex-storage://org/back\\slash.png")).toBeUndefined();
     expect(assetPath("pipelex-storage://org/line\nbreak.png")).toBeUndefined();
     expect(assetPath(`pipelex-storage://org/${"x".repeat(2048)}.png`)).toBeUndefined();
+  });
+});
+
+describe("resolveStoredFile", () => {
+  it("answers the assets route for a stored reference, for the input preview", async () => {
+    await expect(resolveStoredFile("pipelex-storage://org_1/assets/cv.pdf")).resolves.toBe(
+      assetPath("pipelex-storage://org_1/assets/cv.pdf"),
+    );
+  });
+
+  it("answers null — the kernel's 'cannot resolve' — for anything else", async () => {
+    await expect(resolveStoredFile("https://example.com/cv.pdf")).resolves.toBeNull();
   });
 });
 
