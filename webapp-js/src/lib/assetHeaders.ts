@@ -112,10 +112,71 @@ export function isDocumentCapable(contentType: string): boolean {
   return DOCUMENT_CAPABLE_TYPES.has(baseType(contentType));
 }
 
+/** The longest filename offered, extension included — the SDK's cap on a saved artifact's name. */
+const MAX_FILENAME_LENGTH = 128;
+
+/** An extension longer than this, dot included, is not kept when a name is cut. */
+const MAX_EXTENSION_LENGTH = 11;
+
 /**
- * `Content-Disposition` for one asset. The filename is the SDK's
- * `artifactFilename`, already reduced to `[A-Za-z0-9._-]`, so it can be quoted
- * as it is; the guard is against a caller handing something else.
+ * The extension offered for a key that carries none, for the types a run
+ * produces — the SDK's own table. Short on purpose: an unknown type gets no
+ * extension rather than a guessed one.
+ */
+const EXTENSION_BY_TYPE: Record<string, string> = {
+  "image/png": ".png",
+  "image/jpeg": ".jpg",
+  "image/webp": ".webp",
+  "image/gif": ".gif",
+  "image/svg+xml": ".svg",
+  "application/pdf": ".pdf",
+  "text/plain": ".txt",
+  "text/markdown": ".md",
+  "text/html": ".html",
+  "text/csv": ".csv",
+  "application/json": ".json",
+};
+
+/** `.ext` for a bare filename, or `""` — a leading dot is not an extension. */
+function extensionOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot) : "";
+}
+
+/**
+ * The filename offered for one asset: the last segment of its storage key.
+ *
+ * Not the SDK's `artifactFilename`, which names a file after the field it fills
+ * and so needs the location `locateArtifacts` finds in a result. This route
+ * serves one object by its reference and never knows which field of which
+ * result that object fills, and the kernel's download control already names
+ * what it saves after the field. What is named here is the file a browser
+ * offers when the asset is opened on its own, and the object's own key is the
+ * honest name for that.
+ *
+ * Reduced to `[A-Za-z0-9._-]` with no leading or trailing `.`, `_` or `-`, so
+ * it is never hidden and never `..`; `asset` when nothing survives; given the
+ * content type's extension when the key carries none; and cut to the length
+ * cap with a short extension kept.
+ */
+export function assetFilename(uri: string, contentType: string | null): string {
+  const segment = uri.slice(uri.lastIndexOf("/") + 1);
+  let name = segment.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^[._-]+|[._-]+$/g, "") || "asset";
+  if (extensionOf(name) === "" && contentType) {
+    name += EXTENSION_BY_TYPE[baseType(contentType)] ?? "";
+  }
+  if (name.length > MAX_FILENAME_LENGTH) {
+    const extension = extensionOf(name);
+    const kept = extension.length <= MAX_EXTENSION_LENGTH ? extension : "";
+    name = name.slice(0, MAX_FILENAME_LENGTH - kept.length) + kept;
+  }
+  return name;
+}
+
+/**
+ * `Content-Disposition` for one asset. The filename is `assetFilename`'s,
+ * already reduced to `[A-Za-z0-9._-]`, so it can be quoted as it is; the guard
+ * is against a caller handing something else.
  */
 export function contentDisposition(contentType: string, filename?: string): string {
   const mode = isInlineRenderable(contentType) ? "inline" : "attachment";

@@ -20,6 +20,11 @@ jobs:
           cache: "npm"
           cache-dependency-path: webapp-js/package-lock.json
 
+      # The npm release.yml publishes with, so the initializer's tests meet it
+      # here before a release does.
+      - name: Install the release's npm
+        run: npm install -g npm@11
+
       # The root's tooling borrows the first template's Prettier.
       - name: Install the first template's dependencies
         working-directory: webapp-js

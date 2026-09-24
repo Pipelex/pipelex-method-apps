@@ -28,7 +28,9 @@ import { hasLiveApiKey, requireLiveApi } from "./liveApi";
  * - **The route's three header rules hold on the response the browser got**:
  *   `nosniff`, a controlled `Content-Disposition`, and the sandboxing CSP scoped
  *   to document-capable types — so absent on a raster. Private caching too.
- * - **The cost panel labels a partial sum as partial.** Whether a live run mixes
+ * - **The finished run keeps its id**, with its Copy button, under the result.
+ * - **The cost panel labels a partial sum as partial.** It is read after opening
+ *   the "Usage and cost" disclosure it starts closed in. Whether a live run mixes
  *   priced and unrated calls is the rate table's call, not this spec's, so the
  *   assertion is the labelling RULE read off the table: when a row shows an
  *   unpriced call beside a priced footer sum, the footer must not say "Total";
@@ -235,6 +237,8 @@ test("the image tile paints through the assets route, and the cost panel labels 
 
   await page.goto(`${baseUrl}/`, { timeout: NAV_TIMEOUT_MS });
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  // Act only once the page is live: before hydration the form has no handlers.
+  await page.waitForSelector("html[data-hydrated]");
 
   // The form is the kernel's, so the control is reached by role and the
   // humanized name of the method's own input (`image_prompt`).
@@ -266,6 +270,10 @@ test("the image tile paints through the assets route, and the cost panel labels 
   await result.screenshot({ path: tilePath });
   await testInfo.attach("result-tile", { path: tilePath, contentType: "image/png" });
   console.log(`[tile e2e] result tile screenshot: ${tilePath}`);
+  // The finished run keeps its id under the result, beside its Copy button.
+  await expect(page.getByRole("button", { name: "Copy the run id" })).toBeVisible();
+  // The cost panel sits in a disclosure that starts closed: open it as a person would.
+  await page.getByText("Usage and cost").click();
   const costPanel = page.getByRole("region", { name: "Cost report" });
   await expect(costPanel).toBeVisible();
   const costPath = testInfo.outputPath("cost-panel.png");

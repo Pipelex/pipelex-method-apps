@@ -1,10 +1,5 @@
-import {
-  ApiResponseError,
-  ApiUnreachableError,
-  ArtifactFetchError,
-  artifactFilename,
-} from "@pipelex/sdk";
-import { buildAssetHeaders, FRAME_AND_REFERRER_GUARD } from "@/lib/assetHeaders";
+import { ApiResponseError, ApiUnreachableError, ArtifactFetchError } from "@pipelex/sdk";
+import { assetFilename, buildAssetHeaders, FRAME_AND_REFERRER_GUARD } from "@/lib/assetHeaders";
 import { getPipelexClient } from "@/lib/pipelexClient";
 import { allowPlainHttpArtifacts } from "@/lib/serverEnv";
 import { storageUriFromSegments } from "@/lib/storageAsset";
@@ -130,7 +125,7 @@ async function serveAsset(
   }
 
   const headers = buildAssetHeaders(upstream.headers, {
-    filename: artifactFilename(uri, upstream.headers.get("content-type"), 0),
+    filename: assetFilename(uri, upstream.headers.get("content-type")),
   });
 
   if (method === "HEAD") {
