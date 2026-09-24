@@ -5,6 +5,7 @@
  *   the root of a repository with no commit → the pristine commit, its first
  *     … whose index already holds an entry → refused: repository-has-staged-files
  *   the root of a repository with history  → refused: repository-has-history
+ *   where another repository ignores it    → a new repository on main, then the pristine commit
  *   inside another repository's work tree  → no repository and no commit
  *   inside a checkout of a template        → refused: inside-template-checkout
  *
@@ -16,7 +17,15 @@
  * inside another one's work tree makes the enclosing one fail `git add -A`
  * until the nested one has a commit, and then see an embedded repository, so
  * the project becomes new files in the enclosing repository instead, as
- * `create-next-app` does.
+ * `create-next-app` does. A path the enclosing repository ignores is the
+ * exception: a repository nested there is as invisible to it as plain files
+ * would be, and without one the project would be under no version control at
+ * all, so it gets a repository of its own, as outside every work tree. What
+ * counts is the directory: one the enclosing repository does not ignore gets
+ * no repository even when every file in it is ignored, as under a `*` that a
+ * later pattern lifts from every directory, since a repository there would
+ * still show in the enclosing one's status, and the report then says the
+ * project is under no version control.
  */
 
 import { spawnSync } from "node:child_process";
@@ -66,6 +75,7 @@ export function git(args, { cwd, env }) {
  *   { kind: "outside" }
  *   { kind: "template-checkout", origin }
  *   { kind: "root", history: boolean, staged: string[] }   `staged` is read only when there is no history
+ *   { kind: "ignored", toplevel }   the repository whose work tree it is in ignores it
  *   { kind: "inside", toplevel }
  *   { kind: "unreadable-git" }   the destination holds a `.git` git does not read as its repository
  */
@@ -88,7 +98,90 @@ export function readGit({ dest, from, destExists, destHasGit, env }) {
     }
     if (destHasGit) return { kind: "unreadable-git" };
   }
+  if (ignores({ dest, from, env })) return { kind: "ignored", toplevel: top.stdout };
   return { kind: "inside", toplevel: top.stdout };
+}
+
+/**
+ * Whether the repository `from` stands in ignores `dest` as a directory, by
+ * every source git reads: its `.gitignore` files, its `info/exclude` and the
+ * user's `core.excludesFile`. That is exactly when a repository nested there is
+ * invisible to it.
+ *
+ * Git reads a path as a directory only when one stands there, so a missing
+ * destination is made for the question and removed after it. A trailing slash
+ * is no substitute: it makes git test an empty last name as well, which `*` and
+ * `my-app/*` match, so a `*` that a later pattern lifts from every directory
+ * would read a directory it re-includes as ignored. For the same reason the
+ * directory is named from its parent, with no slash, since asked from inside
+ * it as `./` git tests it with one. The name starts with `./` because git
+ * reads a leading `:` as pathspec magic, and `--literal-pathspecs` is refused
+ * by `check-ignore`. Any answer but a plain yes, a directory that cannot be
+ * made included, reads as not ignored, since mistaking a tracked destination
+ * for an ignored one would plant a repository in the user's tracked tree. A
+ * directory that holds a tracked path reads as not ignored whatever the
+ * patterns say, but a destination the preflight accepts holds none.
+ */
+function ignores({ dest, from, env }) {
+  return withDirectories({ dest, from }, false, () => {
+    const name = `./${path.basename(dest)}`;
+    return git(["check-ignore", "-q", "--", name], { cwd: path.dirname(dest), env }).status === 0;
+  });
+}
+
+/**
+ * Whether the repository whose work tree holds `dest` shows none of the files
+ * written there, every one of them being ignored, though the directory is not.
+ * An empty status does not say so alone: a project the enclosing repository
+ * tracks, deleted and then written again as it was, shows nothing either, so
+ * its index must hold nothing under `dest` as well.
+ */
+export function ignoresEveryFile({ dest, env }) {
+  const status = git(["status", "--porcelain", "--untracked-files=all", "--", "."], {
+    cwd: dest,
+    env,
+  });
+  if (status.status !== 0 || status.stdout !== "") return false;
+  const tracked = git(["ls-files", "--", "."], { cwd: dest, env });
+  return tracked.status === 0 && tracked.stdout === "";
+}
+
+/**
+ * Answer with every missing directory from `from`, the destination's nearest
+ * existing ancestor, down to `dest` made for the call and removed after it.
+ * Returns what `answer` returns, or `fallback` when a directory cannot be made
+ * or `answer` throws.
+ *
+ * It removes only what it made, as the write does. Each missing directory is
+ * made without `recursive`, so a path that stands there already, a dangling
+ * symlink the reading took for missing, or one another process creates
+ * meanwhile fails the call instead of being taken over and removed. The
+ * directories go deepest first and only while empty, so what another process
+ * writes into one meanwhile stays.
+ */
+function withDirectories({ dest, from }, fallback, answer) {
+  const missing = [];
+  for (let at = dest; at !== from && path.dirname(at) !== at; at = path.dirname(at)) {
+    missing.unshift(at);
+  }
+  const made = [];
+  try {
+    for (const dir of missing) {
+      fs.mkdirSync(dir);
+      made.push(dir);
+    }
+    return answer();
+  } catch {
+    return fallback;
+  } finally {
+    for (const dir of made.reverse()) {
+      try {
+        fs.rmdirSync(dir);
+      } catch {
+        // Not empty: another process wrote into it, and what it wrote stays.
+      }
+    }
+  }
 }
 
 /** The `origin` of the repository `from` stands in when it is a template's own, or null. */
@@ -107,50 +200,37 @@ export function hasIdentity({ cwd, env }) {
 
 /**
  * Whether git can name an author and a committer for the commit in the
- * repository about to be made at `dest`, which `from`, the destination or its
- * nearest existing ancestor, stands outside of. Outside a repository git reads
- * no `includeIf "gitdir:…"` section, so an identity given only to the
- * repositories under a directory is invisible from `from`. When that reading
- * finds none, the question is asked again inside a throwaway repository made
- * at `dest`, and what the probe made is removed before the answer is returned.
+ * repository about to be made at `dest`. `from` is the destination or its
+ * nearest existing ancestor, and `enclosed` says whether it lies in the work
+ * tree of a repository that ignores the destination.
  *
- * It removes only what it made, as the write does. Each missing directory and
- * the `.git` are made without `recursive`, so a path that stands there already,
- * a dangling symlink the reading took for missing, or one another process
- * creates meanwhile fails the probe instead of being taken over and removed.
- * The directories go deepest first and only while empty, so what another
- * process writes into one meanwhile stays. A probe that cannot be made
- * answers no.
+ * Outside every repository, an identity git shows from `from` is one the new
+ * repository will see too, but git reads no `includeIf "gitdir:…"` section
+ * there, so an identity given only to the repositories under a directory is
+ * invisible from `from`. When that reading finds none, and always when `from`
+ * is enclosed, since it would then read the enclosing repository's own
+ * configuration, which the new repository does not inherit, the question is
+ * asked inside a throwaway repository made at `dest`, and what the probe made
+ * is removed before the answer is returned.
+ *
+ * The missing directories are made and removed as `withDirectories` says, and
+ * the `.git` is made without `recursive` too, so one that stands there already
+ * fails the probe instead of being taken over and removed. A probe that cannot
+ * be made answers no.
  */
-export function hasIdentityForInit({ dest, from, env }) {
-  if (hasIdentity({ cwd: from, env })) return true;
-  const missing = [];
-  for (let at = dest; at !== from && path.dirname(at) !== at; at = path.dirname(at)) {
-    missing.unshift(at);
-  }
-  const probe = path.join(dest, ".git");
-  const made = [];
-  let probeMade = false;
-  try {
-    for (const dir of missing) {
-      fs.mkdirSync(dir);
-      made.push(dir);
-    }
+export function hasIdentityForInit({ dest, from, enclosed, env }) {
+  if (!enclosed && hasIdentity({ cwd: from, env })) return true;
+  return withDirectories({ dest, from }, false, () => {
+    const probe = path.join(dest, ".git");
     fs.mkdirSync(probe);
-    probeMade = true;
-    return git(["init", "-q"], { cwd: dest, env }).status === 0 && hasIdentity({ cwd: dest, env });
-  } catch {
-    return false;
-  } finally {
-    if (probeMade) fs.rmSync(probe, { recursive: true, force: true });
-    for (const dir of made.reverse()) {
-      try {
-        fs.rmdirSync(dir);
-      } catch {
-        // Not empty: another process wrote into it, and what it wrote stays.
-      }
+    try {
+      return (
+        git(["init", "-q"], { cwd: dest, env }).status === 0 && hasIdentity({ cwd: dest, env })
+      );
+    } finally {
+      fs.rmSync(probe, { recursive: true, force: true });
     }
-  }
+  });
 }
 
 /** The pristine commit's message, in the scaffold skill's format. */

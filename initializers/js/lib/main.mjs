@@ -10,14 +10,17 @@
  *     `git` unless `--no-git`; `--method` and `PIPELEX_API_KEY` unless
  *     `--no-create`, the key tested for presence and never printed; the
  *     destination rule; git's reading of the destination, and an identity when
- *     a commit will be made. It writes nothing but the throwaway repository in
- *     which a new repository's identity is read when none shows outside one,
- *     and removes that before going on. Each failure is a `refused:` verdict
- *     naming the fix.
+ *     a commit will be made. It writes nothing but a missing destination inside
+ *     another repository's work tree, made so that git reads it as the
+ *     directory it will be, and the throwaway repository in which a new
+ *     repository's identity is read when none shows outside one, or always
+ *     under a path another repository ignores, and removes each before going
+ *     on. Each failure is a `refused:` verdict naming the fix.
  *  2. **The write**, exclusive, removing what it created when it cannot finish.
- *  3. **Git**: a new repository on `main` outside any work tree, then the pristine
- *     commit; the commit alone at the root of a repository with no commit yet;
- *     nothing inside another repository's work tree, or with `--no-git`.
+ *  3. **Git**: a new repository on `main` outside any work tree or where the
+ *     enclosing repository ignores the destination, then the pristine commit;
+ *     the commit alone at the root of a repository with no commit yet; nothing
+ *     inside another repository's work tree, or with `--no-git`.
  *  4. **`make create`**, unless `--no-create`, streamed or logged.
  *  5. **The report**: the gesture's warnings, the git outcome, and the verdict
  *     line, last.
@@ -36,6 +39,7 @@ import {
   commitPristine,
   hasIdentity,
   hasIdentityForInit,
+  ignoresEveryFile,
   pristineByHand,
   pristineMessage,
   readGit,
@@ -215,13 +219,19 @@ function planGit(args, dest, found, env) {
       return {
         commit: false,
         init: false,
+        inside: reading.toplevel,
         line: `git: ${dest} is inside the work tree of ${reading.toplevel}, so no repository was made and nothing was committed; the project is new files in that repository.`,
       };
+    case "ignored":
+      // The enclosing repository does not version the destination, so the
+      // project gets a repository of its own, as outside every work tree.
+      plan = { commit: true, init: true, ignoredBy: reading.toplevel };
+      break;
     default:
       plan = { commit: true, init: true };
   }
   const identity = plan.init
-    ? hasIdentityForInit({ dest, from, env })
+    ? hasIdentityForInit({ dest, from, enclosed: reading.kind === "ignored", env })
     : hasIdentity({ cwd: from, env });
   if (!identity) {
     throw Verdict.refused(
@@ -333,6 +343,9 @@ async function create(argv, d, say, state) {
   // ── Git ──
   state.phase = "commit";
   let gitLine = git.line;
+  if (git.inside !== undefined && ignoresEveryFile({ dest, env: d.env })) {
+    gitLine = `git: ${dest} is inside the work tree of ${git.inside}, which ignores every file of the project but not its directory, so no repository was made and the project is under no version control.`;
+  }
   if (git.commit) {
     const message = pristineMessage(pack);
     try {
@@ -343,9 +356,14 @@ async function create(argv, d, say, state) {
         message,
         env: d.env,
       });
-      gitLine = git.init
-        ? `git: made a repository on main and committed the template as ${sha.slice(0, 12)}, "${message}".`
-        : `git: committed the template as the repository's first commit, ${sha.slice(0, 12)}, "${message}".`;
+      const committed = `${sha.slice(0, 12)}, "${message}"`;
+      if (git.ignoredBy !== undefined) {
+        gitLine = `git: ${git.ignoredBy} ignores ${dest}, so the project got a repository of its own: made on main, with the template committed as ${committed}.`;
+      } else if (git.init) {
+        gitLine = `git: made a repository on main and committed the template as ${committed}.`;
+      } else {
+        gitLine = `git: committed the template as the repository's first commit, ${committed}.`;
+      }
     } catch (error) {
       for (const line of error.message.split("\n")) say(line);
       throw Verdict.failed(
