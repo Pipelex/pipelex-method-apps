@@ -392,6 +392,27 @@ describe("a run", () => {
     assert.equal(fs.existsSync(path.join(dest, ".git")), false);
   });
 
+  it("does not say a project is under no version control when its enclosing repository tracks it", async () => {
+    const { root, work } = workspace();
+    const env = runEnv(root);
+    git(work, ["init", "-q"], env);
+    const first = await runInitializer(["app", "--no-create"], { cwd: work, env });
+    assert.equal(first.verdict, "copied", first.output);
+    git(work, ["add", "-A"], env);
+    git(work, ["commit", "-q", "-m", "Their copy of the project"], env);
+    const dest = path.join(work, "app");
+    fs.rmSync(dest, { recursive: true });
+    const { output, verdict } = await runInitializer(["app", "--no-create"], { cwd: work, env });
+    assert.equal(verdict, "copied", output);
+    assert.equal(git(work, ["status", "--porcelain"], env), "", "the copy is what was tracked");
+    const said = output.trimEnd().split("\n").at(-2);
+    assert.ok(
+      said.startsWith(`git: ${dest} is inside the work tree of ${work}, so no repository was made`),
+      said,
+    );
+    assert.doesNotMatch(said, /under no version control/);
+  });
+
   it("names the copy and the next make create after --no-create", async () => {
     const { root, work } = workspace();
     const { output } = await runInitializer(["my app", "--no-create", "--title", "Bob's app"], {

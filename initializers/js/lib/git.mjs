@@ -132,13 +132,18 @@ function ignores({ dest, from, env }) {
 /**
  * Whether the repository whose work tree holds `dest` shows none of the files
  * written there, every one of them being ignored, though the directory is not.
+ * An empty status does not say so alone: a project the enclosing repository
+ * tracks, deleted and then written again as it was, shows nothing either, so
+ * its index must hold nothing under `dest` as well.
  */
 export function ignoresEveryFile({ dest, env }) {
   const status = git(["status", "--porcelain", "--untracked-files=all", "--", "."], {
     cwd: dest,
     env,
   });
-  return status.status === 0 && status.stdout === "";
+  if (status.status !== 0 || status.stdout !== "") return false;
+  const tracked = git(["ls-files", "--", "."], { cwd: dest, env });
+  return tracked.status === 0 && tracked.stdout === "";
 }
 
 /**
