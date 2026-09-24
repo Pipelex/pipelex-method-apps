@@ -779,7 +779,7 @@ describe("renderAdapter", () => {
 });
 
 describe("renderAction", () => {
-  it("sends the selector in place of an inline bundle, with the bare pipe code", () => {
+  it("sends the selector in place of an inline bundle, with the qualified pipe ref", () => {
     const source = renderAction(TEXT_STATS_PLAN);
     // The selector is read from the manifest, never copied into the action, so
     // an upgrade — edit the manifest, regenerate — moves the run with the tree.
@@ -789,6 +789,11 @@ describe("renderAction", () => {
     expect(source).toContain('const PIPE_CODE = "analyze_text";');
     expect(source).toContain('requireContract(PIPE_IO_CONTRACTS, "text_stats", PIPE_CODE)');
     expect(source).toContain("method_ref: METHOD_REF,");
+    // The run names the pipe by its exact key: a bare code is searched across
+    // every domain of the method and refused once two domains declare it.
+    expect(source).toContain('const PIPE_REF = "text_stats.analyze_text";');
+    expect(source).toContain("pipe_code: PIPE_REF,");
+    expect(source).not.toContain("pipe_code: PIPE_CODE,");
     // No bundle loader, and no hand-guard beside the gate.
     expect(source).not.toContain("loadBundle");
     expect(source).not.toContain("mthds_contents");
@@ -824,6 +829,8 @@ describe("renderAction", () => {
     // prepareInputs keys on the QUALIFIED ref — a bare pipe code is refused.
     expect(source).toContain('const PIPE_REF = "documents.extract_text_pages";');
     expect(source).toContain("pipe_ref: PIPE_REF,");
+    // …and the run is sent the same ref.
+    expect(source).toContain("pipe_code: PIPE_REF,");
     expect(source).toContain("const METHOD_ID = MANIFEST.method_id;");
     expect(source).toContain("method_id: METHOD_ID,");
     // The file gate runs over the GATED inputs, never beside the gate — so
@@ -851,6 +858,8 @@ describe("renderAction", () => {
     expect(source).toContain('import { loadMethodBundles } from "@/lib/loadBundle";');
     expect(source).toContain('const METHOD_DIR = "receipt-review";');
     expect(source).toContain("mthds_contents: await loadMethodBundles(METHOD_DIR),");
+    expect(source).toContain('const PIPE_REF = "receipt_review.review_receipts";');
+    expect(source).toContain("pipe_code: PIPE_REF,");
     // No manifest and no selector: the bundle is the method.
     expect(source).not.toContain("MANIFEST");
     expect(source).not.toContain("method_ref");
@@ -907,13 +916,14 @@ describe("renderActionTest", () => {
     expect(source).toContain("expect(execute).toHaveBeenCalledWith({");
     expect(source).toContain('import MANIFEST from "@methods/text-stats/method.json";');
     expect(source).toContain("method_ref: MANIFEST.method_ref,");
-    expect(source).toContain('pipe_code: "analyze_text",');
+    expect(source).toContain('pipe_code: "text_stats.analyze_text",');
   });
 
   it("pins the bundle it sends when a bundle-sourced pipe gates on nothing", () => {
     const source = renderActionTest(RECEIPTS_PLAN);
     expect(source).toContain('import { loadMethodBundles } from "@/lib/loadBundle";');
     expect(source).toContain('mthds_contents: await loadMethodBundles("receipt-review"),');
+    expect(source).toContain('pipe_code: "receipt_review.review_receipts",');
     expect(source).toContain("prepareInputs.mockResolvedValueOnce(");
     expect(source).not.toContain("MANIFEST");
   });

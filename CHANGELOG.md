@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Scaffolded runs name their pipe by its qualified ref**: every action `make add-method` and `make create` write in the web app template sends `pipe_code` as `<domain>.<pipe_code>` (`text_stats.analyze_text`) instead of the bare code, and the test scaffolded beside it pins that ref. The runtime looks a qualified ref up exactly, where it searches every domain of the method for a bare code and refuses one that two domains declare, so a run keeps working after its method gains a second domain. An action scaffolded by an earlier template keeps sending the bare code, and setting its `pipe_code` to the qualified ref gives it the same guarantee.
+
 ## [v0.5.2] - 2026-09-24
 
 ### Changed

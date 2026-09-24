@@ -186,13 +186,17 @@ import type { PipelexStartOptions } from "@pipelex/sdk";
 // running `npm run codegen` moves the run together with the generated tree.
 const METHOD_REF = MANIFEST.method_ref;
 const PIPE_CODE = "analyze_text";
+// The run names the pipe by the qualified <domain>.<pipe_code>, an exact key: a bare
+// code is searched for across every domain of the method, and refused as ambiguous
+// once two domains declare it.
+const PIPE_REF = "text_stats.analyze_text";
 
 // The same generated contract the browser rendered the form from.
 const CONTRACT = requireContract(PIPE_IO_CONTRACTS, "text_stats", PIPE_CODE);
 
 // `execute` and `start` take the same options, so one closure drives both.
 async function buildOptions(inputs: Record<string, unknown>): Promise<PipelexStartOptions> {
-  return { method_ref: METHOD_REF, pipe_code: PIPE_CODE, inputs };
+  return { method_ref: METHOD_REF, pipe_code: PIPE_REF, inputs };
 }
 
 // The argument is the schema-shaped data dict, not a hand-typed `text: string`.
