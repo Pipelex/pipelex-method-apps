@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  assetFilename,
   buildAssetHeaders,
   contentDisposition,
   isDocumentCapable,
@@ -66,6 +67,39 @@ describe("buildAssetHeaders", () => {
       new Headers({ "content-type": "image/png", "accept-ranges": "bytes" }),
     );
     expect(headers.get("accept-ranges")).toBeNull();
+  });
+});
+
+describe("assetFilename", () => {
+  it("names the file after the last segment of its storage key", () => {
+    expect(
+      assetFilename("pipelex-storage://org_1/runs/01J/outputs/2325fcfe.png", "image/png"),
+    ).toBe("2325fcfe.png");
+    expect(assetFilename("pipelex-storage://report.pdf", null)).toBe("report.pdf");
+  });
+
+  it("adds the extension a run's type implies when the key carries none, and only then", () => {
+    expect(assetFilename("pipelex-storage://org/outputs/image", "image/png; charset=x")).toBe(
+      "image.png",
+    );
+    expect(assetFilename("pipelex-storage://org/outputs/photo.jpeg", "image/png")).toBe(
+      "photo.jpeg",
+    );
+    expect(assetFilename("pipelex-storage://org/outputs/blob", "application/zip")).toBe("blob");
+  });
+
+  it("reduces the name so it can never be hidden, traverse, or break out of the header", () => {
+    expect(assetFilename('pipelex-storage://org/a b/100% ré"s.png', "image/png")).toBe(
+      "100__r__s.png",
+    );
+    expect(assetFilename("pipelex-storage://org/..hidden.pdf", null)).toBe("hidden.pdf");
+    expect(assetFilename("pipelex-storage://org/…", "application/pdf")).toBe("asset.pdf");
+  });
+
+  it("cuts a long name to the cap and keeps its extension", () => {
+    const name = assetFilename(`pipelex-storage://org/${"a".repeat(300)}.pdf`, null);
+    expect(name).toHaveLength(128);
+    expect(name.endsWith(".pdf")).toBe(true);
   });
 });
 
