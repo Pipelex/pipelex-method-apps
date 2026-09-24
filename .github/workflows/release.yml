@@ -87,9 +87,9 @@ jobs:
 
       # --ignore-scripts skips `prepack`, so the packs published are the ones
       # the step above made and the tests read. Provenance is npm's own and is
-      # unaffected. The first release fails here, since npm trusts a publisher
-      # only for a package that exists: the release skill says how a person
-      # publishes it once by hand.
+      # unaffected. npm authenticates the publish as the package's trusted
+      # publisher, registered on npmjs.com for this file: an E404 on the PUT
+      # means npm refused it, and the release skill says how to restore it.
       - name: Publish to npm
         id: publish
         if: steps.published.outputs.already == 'false'
