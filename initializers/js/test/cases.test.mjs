@@ -37,6 +37,9 @@ const ENCLOSING = {
   "ignored-parent": { ignores: ["tmp/"], under: "tmp" },
   "ignored-by-name": { ignores: ["my-app/"], under: "" },
   "re-included": { ignores: ["apps/*", "!apps/my-app/"], under: "apps" },
+  "ignores-everything": { ignores: ["*"], under: "" },
+  "ignores-files-only": { ignores: ["*", "!*/"], under: "" },
+  "contents-ignored": { ignores: ["my-app/*", "!my-app/package.json"], under: "" },
 };
 
 /** The destination's parent, inside what the case says. */
@@ -55,7 +58,7 @@ function within(root, kind) {
   fs.writeFileSync(path.join(repo, "README.md"), "theirs\n");
   if (ignores.length > 0)
     fs.writeFileSync(path.join(repo, ".gitignore"), `${ignores.join("\n")}\n`);
-  git(repo, ["add", "-A"], env);
+  git(repo, ["add", "--force", "-A"], env);
   git(repo, ["commit", "-q", "-m", "Their first commit"], env);
   const origin =
     kind === "template-checkout"

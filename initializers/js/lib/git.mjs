@@ -20,7 +20,12 @@
  * `create-next-app` does. A path the enclosing repository ignores is the
  * exception: a repository nested there is as invisible to it as plain files
  * would be, and without one the project would be under no version control at
- * all, so it gets a repository of its own, as outside every work tree.
+ * all, so it gets a repository of its own, as outside every work tree. What
+ * counts is the directory: one the enclosing repository does not ignore gets
+ * no repository even when every file in it is ignored, as under a `*` that a
+ * later pattern lifts from every directory, since a repository there would
+ * still show in the enclosing one's status, and the report then says the
+ * project is under no version control.
  */
 
 import { spawnSync } from "node:child_process";
@@ -98,26 +103,80 @@ export function readGit({ dest, from, destExists, destHasGit, env }) {
 }
 
 /**
- * Whether the repository `from` stands in ignores `dest`, by every source git
- * reads: its `.gitignore` files, its `info/exclude` and the user's
- * `core.excludesFile`.
+ * Whether the repository `from` stands in ignores `dest` as a directory, by
+ * every source git reads: its `.gitignore` files, its `info/exclude` and the
+ * user's `core.excludesFile`. That is exactly when a repository nested there is
+ * invisible to it.
  *
- * The path is named relative to `from` and read as a directory, with a
- * trailing slash, because a destination that does not exist yet cannot tell git
- * it is one: without the slash a directory-only pattern such as `build/` misses
- * it, and one re-included by `!apps/my-app/` after `apps/*` reads as ignored.
- * It starts with `./` because git reads a leading `:` as pathspec magic, and it
- * is not passed with `--literal-pathspecs`, which `check-ignore` refuses. Any
- * answer but a plain yes reads as not ignored, since mistaking a tracked
- * destination for an ignored one would plant a repository in the user's
- * tracked tree. A directory that holds a tracked path reads as not ignored
- * whatever the patterns say, but a destination the preflight accepts holds
- * none.
+ * Git reads a path as a directory only when one stands there, so a missing
+ * destination is made for the question and removed after it. A trailing slash
+ * is no substitute: it makes git test an empty last name as well, which `*` and
+ * `my-app/*` match, so a `*` that a later pattern lifts from every directory
+ * would read a directory it re-includes as ignored. For the same reason the
+ * directory is named from its parent, with no slash, since asked from inside
+ * it as `./` git tests it with one. The name starts with `./` because git
+ * reads a leading `:` as pathspec magic, and `--literal-pathspecs` is refused
+ * by `check-ignore`. Any answer but a plain yes, a directory that cannot be
+ * made included, reads as not ignored, since mistaking a tracked destination
+ * for an ignored one would plant a repository in the user's tracked tree. A
+ * directory that holds a tracked path reads as not ignored whatever the
+ * patterns say, but a destination the preflight accepts holds none.
  */
 function ignores({ dest, from, env }) {
-  const relative = path.relative(from, dest).split(path.sep).join("/");
-  const spec = relative === "" ? "./" : `./${relative}/`;
-  return git(["check-ignore", "-q", "--", spec], { cwd: from, env }).status === 0;
+  return withDirectories({ dest, from }, false, () => {
+    const name = `./${path.basename(dest)}`;
+    return git(["check-ignore", "-q", "--", name], { cwd: path.dirname(dest), env }).status === 0;
+  });
+}
+
+/**
+ * Whether the repository whose work tree holds `dest` shows none of the files
+ * written there, every one of them being ignored, though the directory is not.
+ */
+export function ignoresEveryFile({ dest, env }) {
+  const status = git(["status", "--porcelain", "--untracked-files=all", "--", "."], {
+    cwd: dest,
+    env,
+  });
+  return status.status === 0 && status.stdout === "";
+}
+
+/**
+ * Answer with every missing directory from `from`, the destination's nearest
+ * existing ancestor, down to `dest` made for the call and removed after it.
+ * Returns what `answer` returns, or `fallback` when a directory cannot be made
+ * or `answer` throws.
+ *
+ * It removes only what it made, as the write does. Each missing directory is
+ * made without `recursive`, so a path that stands there already, a dangling
+ * symlink the reading took for missing, or one another process creates
+ * meanwhile fails the call instead of being taken over and removed. The
+ * directories go deepest first and only while empty, so what another process
+ * writes into one meanwhile stays.
+ */
+function withDirectories({ dest, from }, fallback, answer) {
+  const missing = [];
+  for (let at = dest; at !== from && path.dirname(at) !== at; at = path.dirname(at)) {
+    missing.unshift(at);
+  }
+  const made = [];
+  try {
+    for (const dir of missing) {
+      fs.mkdirSync(dir);
+      made.push(dir);
+    }
+    return answer();
+  } catch {
+    return fallback;
+  } finally {
+    for (const dir of made.reverse()) {
+      try {
+        fs.rmdirSync(dir);
+      } catch {
+        // Not empty: another process wrote into it, and what it wrote stays.
+      }
+    }
+  }
 }
 
 /** The `origin` of the repository `from` stands in when it is a template's own, or null. */
@@ -149,43 +208,24 @@ export function hasIdentity({ cwd, env }) {
  * asked inside a throwaway repository made at `dest`, and what the probe made
  * is removed before the answer is returned.
  *
- * It removes only what it made, as the write does. Each missing directory and
- * the `.git` are made without `recursive`, so a path that stands there already,
- * a dangling symlink the reading took for missing, or one another process
- * creates meanwhile fails the probe instead of being taken over and removed.
- * The directories go deepest first and only while empty, so what another
- * process writes into one meanwhile stays. A probe that cannot be made
- * answers no.
+ * The missing directories are made and removed as `withDirectories` says, and
+ * the `.git` is made without `recursive` too, so one that stands there already
+ * fails the probe instead of being taken over and removed. A probe that cannot
+ * be made answers no.
  */
 export function hasIdentityForInit({ dest, from, enclosed, env }) {
   if (!enclosed && hasIdentity({ cwd: from, env })) return true;
-  const missing = [];
-  for (let at = dest; at !== from && path.dirname(at) !== at; at = path.dirname(at)) {
-    missing.unshift(at);
-  }
-  const probe = path.join(dest, ".git");
-  const made = [];
-  let probeMade = false;
-  try {
-    for (const dir of missing) {
-      fs.mkdirSync(dir);
-      made.push(dir);
-    }
+  return withDirectories({ dest, from }, false, () => {
+    const probe = path.join(dest, ".git");
     fs.mkdirSync(probe);
-    probeMade = true;
-    return git(["init", "-q"], { cwd: dest, env }).status === 0 && hasIdentity({ cwd: dest, env });
-  } catch {
-    return false;
-  } finally {
-    if (probeMade) fs.rmSync(probe, { recursive: true, force: true });
-    for (const dir of made.reverse()) {
-      try {
-        fs.rmdirSync(dir);
-      } catch {
-        // Not empty: another process wrote into it, and what it wrote stays.
-      }
+    try {
+      return (
+        git(["init", "-q"], { cwd: dest, env }).status === 0 && hasIdentity({ cwd: dest, env })
+      );
+    } finally {
+      fs.rmSync(probe, { recursive: true, force: true });
     }
-  }
+  });
 }
 
 /** The pristine commit's message, in the scaffold skill's format. */

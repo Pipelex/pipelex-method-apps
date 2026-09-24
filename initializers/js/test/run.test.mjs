@@ -377,6 +377,21 @@ describe("a run", () => {
     );
   });
 
+  it("says a project is under no version control when its enclosing repository ignores every file of it", async () => {
+    const { root, work } = workspace();
+    const env = runEnv(root);
+    git(work, ["init", "-q"], env);
+    fs.writeFileSync(path.join(work, ".gitignore"), "*\n!*/\n");
+    const { output, verdict } = await runInitializer(["app", "--no-create"], { cwd: work, env });
+    assert.equal(verdict, "copied", output);
+    const dest = path.join(work, "app");
+    assert.equal(
+      output.trimEnd().split("\n").at(-2),
+      `git: ${dest} is inside the work tree of ${work}, which ignores every file of the project but not its directory, so no repository was made and the project is under no version control.`,
+    );
+    assert.equal(fs.existsSync(path.join(dest, ".git")), false);
+  });
+
   it("names the copy and the next make create after --no-create", async () => {
     const { root, work } = workspace();
     const { output } = await runInitializer(["my app", "--no-create", "--title", "Bob's app"], {

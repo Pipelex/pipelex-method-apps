@@ -10,10 +10,12 @@
  *     `git` unless `--no-git`; `--method` and `PIPELEX_API_KEY` unless
  *     `--no-create`, the key tested for presence and never printed; the
  *     destination rule; git's reading of the destination, and an identity when
- *     a commit will be made. It writes nothing but the throwaway repository in
- *     which a new repository's identity is read when none shows outside one,
- *     or always under a path another repository ignores, and removes that
- *     before going on. Each failure is a `refused:` verdict naming the fix.
+ *     a commit will be made. It writes nothing but a missing destination inside
+ *     another repository's work tree, made so that git reads it as the
+ *     directory it will be, and the throwaway repository in which a new
+ *     repository's identity is read when none shows outside one, or always
+ *     under a path another repository ignores, and removes each before going
+ *     on. Each failure is a `refused:` verdict naming the fix.
  *  2. **The write**, exclusive, removing what it created when it cannot finish.
  *  3. **Git**: a new repository on `main` outside any work tree or where the
  *     enclosing repository ignores the destination, then the pristine commit;
@@ -37,6 +39,7 @@ import {
   commitPristine,
   hasIdentity,
   hasIdentityForInit,
+  ignoresEveryFile,
   pristineByHand,
   pristineMessage,
   readGit,
@@ -216,6 +219,7 @@ function planGit(args, dest, found, env) {
       return {
         commit: false,
         init: false,
+        inside: reading.toplevel,
         line: `git: ${dest} is inside the work tree of ${reading.toplevel}, so no repository was made and nothing was committed; the project is new files in that repository.`,
       };
     case "ignored":
@@ -339,6 +343,9 @@ async function create(argv, d, say, state) {
   // ── Git ──
   state.phase = "commit";
   let gitLine = git.line;
+  if (git.inside !== undefined && ignoresEveryFile({ dest, env: d.env })) {
+    gitLine = `git: ${dest} is inside the work tree of ${git.inside}, which ignores every file of the project but not its directory, so no repository was made and the project is under no version control.`;
+  }
   if (git.commit) {
     const message = pristineMessage(pack);
     try {

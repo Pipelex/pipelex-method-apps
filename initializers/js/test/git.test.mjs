@@ -1,7 +1,7 @@
 // Git's reading of a destination inside another repository's work tree: which
-// of its ignore sources count, and the paths `check-ignore` could misread. The
-// family's table of cases covers a `.gitignore`; these cover what it does not
-// vary.
+// of its ignore sources count, and the patterns and paths `check-ignore` could
+// misread. The family's table of cases covers a `.gitignore`; these cover what
+// it does not vary.
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -22,7 +22,7 @@ function enclosing(gitignore = []) {
   fs.writeFileSync(path.join(repo, "README.md"), "theirs\n");
   if (gitignore.length > 0)
     fs.writeFileSync(path.join(repo, ".gitignore"), `${gitignore.join("\n")}\n`);
-  git(repo, ["add", "-A"], env);
+  git(repo, ["add", "--force", "-A"], env);
   git(repo, ["commit", "-q", "-m", "Their first commit"], env);
   return { root, repo, env: isolatedEnv(root) };
 }
@@ -36,6 +36,11 @@ function readMissing(dest, env) {
     destHasGit: false,
     env,
   });
+}
+
+/** Read git at an existing empty destination, as the preflight does. */
+function readExisting(dest, env) {
+  return readGit({ dest, from: dest, destExists: true, destHasGit: false, env });
 }
 
 describe("readGit inside another repository's work tree", () => {
@@ -62,9 +67,9 @@ describe("readGit inside another repository's work tree", () => {
     assert.deepEqual(reading, { kind: "ignored", toplevel: repo });
   });
 
-  it("reads a path whose first name starts with a colon literally", () => {
+  it("reads a destination whose name starts with a colon literally", () => {
     const { repo, env } = enclosing(["/:odd/"]);
-    assert.deepEqual(readMissing(path.join(repo, ":odd", "my-app"), env), {
+    assert.deepEqual(readMissing(path.join(repo, ":odd"), env), {
       kind: "ignored",
       toplevel: repo,
     });
@@ -74,11 +79,30 @@ describe("readGit inside another repository's work tree", () => {
     const { repo, env } = enclosing(["my-app/"]);
     const dest = path.join(repo, "my-app");
     fs.mkdirSync(dest);
-    assert.deepEqual(readGit({ dest, from: dest, destExists: true, destHasGit: false, env }), {
+    assert.deepEqual(readExisting(dest, env), { kind: "ignored", toplevel: repo });
+  });
+
+  it("reads a directory ignored with everything else by *", () => {
+    const { repo, env } = enclosing(["*"]);
+    assert.deepEqual(readMissing(path.join(repo, "work", "my-app"), env), {
       kind: "ignored",
       toplevel: repo,
     });
   });
+
+  for (const [what, patterns] of [
+    ["* then !*/, which ignores its files alone", ["*", "!*/"]],
+    ["my-app/*, which ignores what it holds alone", ["my-app/*", "!my-app/package.json"]],
+  ]) {
+    it(`reads a directory under ${what} as inside, whether or not it exists`, () => {
+      const { repo, env } = enclosing(patterns);
+      const dest = path.join(repo, "my-app");
+      assert.deepEqual(readMissing(dest, env), { kind: "inside", toplevel: repo });
+      assert.equal(fs.existsSync(dest), false, "the directory made for the reading is removed");
+      fs.mkdirSync(dest);
+      assert.deepEqual(readExisting(dest, env), { kind: "inside", toplevel: repo });
+    });
+  }
 
   it("reads a destination under a tracked path as inside", () => {
     const { repo, env } = enclosing(["*.log"]);
