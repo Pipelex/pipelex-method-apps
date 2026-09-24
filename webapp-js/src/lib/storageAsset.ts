@@ -84,6 +84,17 @@ export function assetPath(uri: string): string | undefined {
 }
 
 /**
+ * `assetPath` in the shape the form kernel's input controls ask for: the file
+ * field's `env.resolveUrl`, which previews a file the form holds as a stored
+ * reference once it no longer holds the dropped `File` itself. The input seam is
+ * asynchronous and answers `null` for "cannot resolve"; the rewrite has no round
+ * trip to make, so this only adapts the answer.
+ */
+export async function resolveStoredFile(uri: string): Promise<string | null> {
+  return assetPath(uri) ?? null;
+}
+
+/**
  * The inverse, for the route handler: rebuild the reference from the decoded
  * catch-all segments Next hands it. `undefined` for anything that is not a
  * plain, traversal-free path, so the route can refuse before it resolves.

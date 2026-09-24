@@ -20,6 +20,7 @@ import {
   buildClientTimeoutError,
   classifyPipelineError,
   classifyTransportError,
+  classifyUploadError,
   type ClassifyEnv,
 } from "./errors";
 
@@ -508,6 +509,40 @@ describe("classifyPipelineError — input-preparation (upload) errors", () => {
     const result = classifyPipelineError(err, CLOUD_ENV);
     expect(result.kind).toBe("upload_failed");
     expect(result.details).toContain("Malformed data URL");
+  });
+});
+
+describe("classifyUploadError — a file's upload, in the browser", () => {
+  it.each([
+    ["grant_expired", /permission ran out/i, /expired/],
+    ["grant_used", /permission ran out/i, /already been used/],
+    ["signature_mismatch", /changed before it was stored/i, /no longer matches/],
+    ["too_large", /too large/i, /size limit/],
+  ] as const)("says what a storage refusal coded %s means", (code, title, message) => {
+    const err = new RejectedAssetError("refused", "receipt.jpg", 403, { code });
+    const result = classifyUploadError(err);
+    expect(result.kind).toBe("upload_failed");
+    expect(result.title).toMatch(title);
+    expect(result.message).toMatch(message);
+    expect(result.message).toContain("receipt.jpg");
+    expect(result.details).toContain(`code: ${code}`);
+  });
+
+  it("names storage, not this app's server, when storage cannot be reached", () => {
+    const result = classifyUploadError(new UploadTransportError("could not reach storage"));
+    expect(result.kind).toBe("upload_failed");
+    expect(result.title).toBe("Could not reach Pipelex storage");
+  });
+
+  it("says an upload ran out of time when its own time limit fired", () => {
+    const result = classifyUploadError(new DOMException("signal timed out", "TimeoutError"));
+    expect(result.kind).toBe("upload_failed");
+    expect(result.title).toBe("The upload took too long");
+  });
+
+  it("treats anything else as the grant request failing to reach this app", () => {
+    const result = classifyUploadError(new TypeError("Failed to fetch"));
+    expect(result.kind).toBe("transport_error");
   });
 });
 

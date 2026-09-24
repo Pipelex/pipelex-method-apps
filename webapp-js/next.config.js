@@ -1,23 +1,20 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // A method with a file input uploads the file in the browser, base64-encodes
-  // it, and sends it to a Server Action. Base64 inflates payloads by ~37%, so
-  // an 8 MB file (MAX_FILE_BYTES in src/lib/fileEncoding.ts) becomes an ~11 MB
-  // request body — over the 1 MB Server Action default.
-  experimental: {
-    serverActions: {
-      bodySizeLimit: "12mb",
-    },
-  },
+  // No `serverActions.bodySizeLimit`: the 1 MB default fits every request this
+  // app makes. A dropped file goes from the browser straight to Pipelex storage
+  // with an upload grant (src/hooks/useFileInputs.ts), so a Server Action only
+  // ever receives a file's name, type and size, and a run only references. The
+  // limit used to be raised for files sent inline as base64, which is what a
+  // list of photos outgrew; keeping the default refuses such a body outright.
   // The floating badge `next dev` draws on every page. The app is what its
   // developer shows people, and the badge is chrome of Next's, not of the app.
   // Next still surfaces compile and runtime errors with it off.
   devIndicators: false,
-  // `next dev` logs every Server Function call with its arguments, and a file
-  // input reaches its Server Action as a base64 `data:` URL — so every document
-  // a user drops into the form (a CV, a contract, an invoice) was printed whole
-  // into the dev server's log. Only the object form turns that one log off:
-  // `logging: false` would silence the fetch logs too.
+  // `next dev` logs every Server Function call with its arguments, which are
+  // whatever a user typed into the form — a contract's text, a candidate's
+  // details — and, before files went straight to storage, every document a user
+  // dropped, printed whole as base64. Only the object form turns that one log
+  // off: `logging: false` would silence the fetch logs too.
   logging: {
     serverFunctions: false,
   },

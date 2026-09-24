@@ -1090,7 +1090,8 @@ export function renderAction(plan: ScaffoldPlan): string {
       reference.imports.length + 2,
       0,
       'import { getPipelexClient } from "@/lib/pipelexClient";',
-      'import { MAX_FILE_BYTES, checkFileInputs } from "@/lib/fileEncoding";',
+      'import { MAX_FILE_BYTES, checkFileInputs, type UploadRequest } from "@/lib/fileInputs";',
+      'import { grantFileUpload, type GrantOutcome } from "@/lib/uploadGrant";',
       'import type { PipelineError } from "@/lib/errors";',
     );
   }
@@ -1154,29 +1155,37 @@ export function renderAction(plan: ScaffoldPlan): string {
       " * The kernel gate proves the shape a contract can declare; `checkFileInputs`",
       " * proves what it cannot: that the `url` at every file position the descriptor",
       " * declares — top-level, in a list, nested in a structured concept — is a",
-      " * reference we accept, and that any bytes riding inline are an allowed type",
-      " * under the cap. The scheme half is the security-relevant one — `prepareInputs`",
-      " * reads an unrecognised string as a local filesystem path, and a Server Action",
-      " * is a public endpoint.",
+      " * reference we accept. The browser stored each file before the run, so a run",
+      " * carries references and never bytes. The check is the security-relevant one —",
+      " * `prepareInputs` reads an unrecognised string as a local filesystem path, and",
+      " * a Server Action is a public endpoint.",
       " */",
       "function gateInputs(",
       "  data: Record<string, unknown>,",
       "): { ok: true; inputs: Record<string, unknown> } | { ok: false; error: PipelineError } {",
       "  const gated = gateRunInputs(CONTRACT, data);",
       "  if (!gated.ok) return gated;",
-      "  const error = checkFileInputs(DESCRIPTOR, gated.inputs, {",
-      "    allowedMimes: ALLOWED_MIMES,",
-      "    maxBytes: MAX_FILE_BYTES,",
-      "  });",
+      "  const error = checkFileInputs(DESCRIPTOR, gated.inputs);",
       "  return error ? { ok: false, error } : gated;",
       "}",
       "",
       "/**",
-      " * Build the run options, uploading the file(s) through the SDK's",
-      " * signature-driven `prepareInputs` rather than hand-rolling an envelope: it",
-      " * reads the method's declared signature, uploads the decoded bytes to Pipelex",
-      " * storage and rewrites each file input to a small `pipelex-storage://` URI, so",
-      " * the run request carries a reference instead of fat inline base64.",
+      " * UPLOAD — a grant for the browser to store one dropped file straight in Pipelex",
+      " * storage, before any run. Only the file's name, type and size reach this",
+      " * action, never its bytes; it refuses a type outside `ALLOWED_MIMES` and a size",
+      " * past `MAX_FILE_BYTES`, then asks the platform for a create-only `PUT` signed",
+      " * for exactly that file. The form's `useFileInputs` sends the file with it and",
+      " * keeps the `pipelex-storage://` reference the run then carries.",
+      " */",
+      `export async function request${names.pascal}Upload(request: UploadRequest): Promise<GrantOutcome> {`,
+      "  return grantFileUpload(request, { allowedMimes: ALLOWED_MIMES, maxBytes: MAX_FILE_BYTES });",
+      "}",
+      "",
+      "/**",
+      " * Build the run options through the SDK's signature-driven `prepareInputs`",
+      " * rather than a hand-rolled envelope: it reads the method's declared signature",
+      " * and shapes each file position as the run expects it. The files themselves are",
+      " * already in Pipelex storage, so it passes their references through untouched.",
       " *",
       " * It throws *before any run starts*, and this closure runs inside",
       " * `executeBlockingRun` / `startDurableRun`'s try/catch, so that error is",
@@ -1237,7 +1246,8 @@ export function renderAction(plan: ScaffoldPlan): string {
   body.push(
     "/**",
     " * BLOCKING path (`POST /v1/execute`). Behind the hosted gateway a synchronous run",
-    " * is cut off at ~30s; switch to Durable mode to survive a long one.",
+    " * is cut off at ~30s; the Durable mode, `NEXT_PUBLIC_EXECUTION_MODE`'s default,",
+    " * survives a long one.",
     " */",
     `export async function run${names.pascal}Blocking(`,
     "  data: Record<string, unknown>,",
@@ -1281,7 +1291,7 @@ export function renderActionTest(plan: ScaffoldPlan): string {
   const hasFiles = files.length > 0;
 
   const clientMethods = ["execute", "start", "getRunStatus", "getRunResult"];
-  if (hasFiles) clientMethods.push("prepareInputs");
+  if (hasFiles) clientMethods.push("prepareInputs", "requestUploadGrant");
 
   // Only the non-gating test reads the method; an unused import fails tsc.
   const methodImport = gating
@@ -1304,11 +1314,13 @@ export function renderActionTest(plan: ScaffoldPlan): string {
     "}));",
     "",
     ...methodImport,
-    // The gating test drives both paths; the wiring test drives the blocking one,
-    // and an unused import fails tsc.
-    gating
-      ? `import { run${names.pascal}Blocking, start${names.pascal}Run } from "./run${names.pascal}Pipeline";`
-      : `import { run${names.pascal}Blocking } from "./run${names.pascal}Pipeline";`,
+    // The gating test drives both paths; the wiring test drives the blocking one;
+    // a file method's grant test drives its upload action. An unused import fails tsc.
+    `import { ${[
+      ...(hasFiles ? [`request${names.pascal}Upload`] : []),
+      `run${names.pascal}Blocking`,
+      ...(gating ? [`start${names.pascal}Run`] : []),
+    ].join(", ")} } from "./run${names.pascal}Pipeline";`,
     "",
     "beforeEach(() => {",
     ...clientMethods.map((method) => `  ${method}.mockReset();`),
@@ -1358,7 +1370,25 @@ export function renderActionTest(plan: ScaffoldPlan): string {
         "  });",
       ];
 
-  return [...head, ...body, "});", ""].join("\n");
+  // A file is stored before any run, through a grant this action asks for, so
+  // the grant action is a trust boundary of its own: a type the method does not
+  // take is refused before the platform is asked for anything.
+  const upload = hasFiles
+    ? [
+        "",
+        '  it("refuses to grant an upload of a type the method does not take", async () => {',
+        `    const result = await request${names.pascal}Upload({`,
+        '      filename: "notes.txt",',
+        '      content_type: "text/plain",',
+        "      size: 12,",
+        "    });",
+        '    expect(result).toMatchObject({ ok: false, error: { kind: "unsupported_file_type" } });',
+        "    expect(requestUploadGrant).not.toHaveBeenCalled();",
+        "  });",
+      ]
+    : [];
+
+  return [...head, ...body, ...upload, "});", ""].join("\n");
 }
 
 /**
@@ -1376,16 +1406,17 @@ export function renderActionTest(plan: ScaffoldPlan): string {
 export function renderForm(plan: ScaffoldPlan): string {
   const { names, pipe, files } = plan;
   const hasFiles = files.length > 0;
-  // While a file is being encoded its value is unset, and `ready` only speaks
+  // While a file is being uploaded its value is unset, and `ready` only speaks
   // for the inputs the gate refuses empty — so a form holding an optional or
-  // non-gating file input must wait for the encode, or it runs without it.
-  const busy = hasFiles ? "running || encodingIds.size > 0" : "running";
+  // non-gating file input must wait for the upload, or it runs without it.
+  const busy = hasFiles ? "running || uploadingIds.size > 0" : "running";
 
   const imports = [
     '"use client";',
     "",
     "import {",
     `  poll${names.pascal}Run,`,
+    ...(hasFiles ? [`  request${names.pascal}Upload,`] : []),
     `  run${names.pascal}Blocking,`,
     `  start${names.pascal}Run,`,
     `} from "@/actions/run${names.pascal}Pipeline";`,
@@ -1396,6 +1427,7 @@ export function renderForm(plan: ScaffoldPlan): string {
     'import { useRunInputs } from "@/hooks/useRunInputs";',
     'import { requireResultField } from "@/lib/resultField";',
     'import { requireContract, requireInputForm } from "@/lib/runInputs";',
+    ...(hasFiles ? ['import { resolveStoredFile } from "@/lib/storageAsset";'] : []),
     'import { ErrorDisplay } from "./ErrorDisplay";',
     'import { RunDetails } from "./RunDetails";',
     'import { RunInputsForm } from "./RunInputsForm";',
@@ -1429,11 +1461,13 @@ export function renderForm(plan: ScaffoldPlan): string {
 
   if (hasFiles) {
     imports.push(
-      "  // The host side of the form kernel's file seam — the encode, the busy set the",
-      "  // kernel reads as `uploadingIds`, the clear-before-await discipline. The kernel",
-      "  // never uploads: it hands the host a `File` and waits for a `FileValue` back.",
-      "  const { dropFile, encodingIds, fileError, clearError } = useFileInputs({",
+      "  // The host side of the form kernel's file seam — the upload straight from the",
+      "  // browser to Pipelex storage, the busy set the kernel reads as `uploadingIds`,",
+      "  // the clear-before-await discipline. The kernel never uploads: it hands the",
+      "  // host a `File` and waits for a `FileValue` back, here a stored reference.",
+      "  const { dropFile, uploadingIds, fileError, clearError } = useFileInputs({",
       "    setValues,",
+      `    requestUpload: request${names.pascal}Upload,`,
       "    onSelectionStart: reset,",
       "  });",
       "",
@@ -1445,7 +1479,7 @@ export function renderForm(plan: ScaffoldPlan): string {
   const submit = [
     "  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {",
     "    event.preventDefault();",
-    ...(hasFiles ? ["    if (encodingIds.size > 0) return;", "    clearError();"] : []),
+    ...(hasFiles ? ["    if (uploadingIds.size > 0) return;", "    clearError();"] : []),
     "    // The action gates the same contract server-side, applying the kernel's",
     "    // rules in full — that is the trust boundary; `ready` below is only UX.",
     "    run(toData());",
@@ -1465,7 +1499,7 @@ export function renderForm(plan: ScaffoldPlan): string {
         "            setValues(next);",
         "          }}",
         "          disabled={running}",
-        "          env={{ onDropFile: dropFile, uploadingIds: encodingIds }}",
+        "          env={{ onDropFile: dropFile, uploadingIds, resolveUrl: resolveStoredFile }}",
         "        />",
       ]
     : [

@@ -19,6 +19,7 @@ import {
   RunTimeoutError,
   UnsupportedUploadCapabilityError,
   UploadAuthenticationError,
+  UploadTransportError,
 } from "@pipelex/sdk";
 import { BadPipelineOutputError } from "@/types/pipelineError";
 
@@ -43,15 +44,20 @@ export type PipelineErrorKind =
   | "run_failed"
   | "run_timeout"
   | "lifecycle_unavailable"
-  // Input-preparation / upload failure from the SDK's `prepareInputs` — a method
-  // with a file input uploads the file to Pipelex storage before the run, and that upload can
-  // fail in a few distinct, actionable ways. Classified from `InputPreparationError`
-  // and its subclasses into one kind with subclass-tailored copy.
+  // A file input's upload failed. The browser sends a dropped file straight to
+  // Pipelex storage with an upload grant (`useFileInputs`), and that can fail in
+  // a few distinct, actionable ways — classified from `InputPreparationError` and
+  // its subclasses into one kind with subclass-tailored copy, on the server by
+  // `classifyPipelineError` and in the browser by `classifyUploadError`.
   | "upload_failed"
-  // Pre-flight validation kinds: built inline by a Server Action before the
-  // SDK call (see `checkFileInputs` / `fileInputErrorToPipelineError`),
-  // never produced by `classifyPipelineError` — there is no thrown error to
-  // classify. They are still valid kinds so `<ErrorDisplay>` renders them.
+  // The configured API does not serve `POST /v1/upload/grant`, so a file cannot
+  // be stored at all. Classified by `classifyPipelineError` with `uploadGrant`.
+  | "upload_unavailable"
+  // Pre-flight validation kinds: built inline before the SDK call (see
+  // `checkUploadRequest` / `fileInputErrorToPipelineError`), never produced by
+  // `classifyPipelineError` from a thrown error — except a grant request the
+  // API itself refuses as too large, which is the same fact from its authority.
+  // They are valid kinds so `<ErrorDisplay>` renders them.
   | "file_too_large"
   | "unsupported_file_type"
   | "unknown";
@@ -100,6 +106,13 @@ export interface ClassifyOptions {
    * transient server hiccup, so this flag scopes the mapping correctly.
    */
   blocking?: boolean;
+  /**
+   * Set by `grantFileUpload`, whose one request is `POST /v1/upload/grant`. A
+   * `404` there means the configured API does not serve upload grants — every
+   * other 404 on that route is impossible — and a `413` is the platform refusing
+   * a declared size over its limit, which is the authority on "too large".
+   */
+  uploadGrant?: boolean;
 }
 
 export function classifyPipelineError(
@@ -112,6 +125,8 @@ export function classifyPipelineError(
     if (opts?.blocking && (err.status === 502 || err.status === 504)) {
       return classifyBlockingGatewayTimeout(err);
     }
+    if (opts?.uploadGrant && err.status === 404) return classifyUploadUnavailable(err, env);
+    if (opts?.uploadGrant && err.status === 413) return classifyGrantTooLarge(err);
     return classifyResponse(err, env);
   }
   if (err instanceof ClientAuthenticationError) return classifyClientAuth(err, env);
@@ -484,16 +499,8 @@ function classifyInputPreparationError(
     };
   }
 
-  // Server refused the asset (413) — past the service-defined size cap.
-  if (err instanceof RejectedAssetError) {
-    return {
-      kind: "upload_failed",
-      title: "The file was rejected by the server",
-      message: `Pipelex storage refused the upload (HTTP ${err.status}) — the file is likely past the service's size limit. Try a smaller file.`,
-      apiMessage: causeServerMessage(err),
-      details: `${details}\nfilename: ${err.filename}`,
-    };
-  }
+  // The server or storage refused the asset; its `code` says why.
+  if (err instanceof RejectedAssetError) return classifyRejectedAsset(err);
 
   // Upload not authorized (401/403) — same fix as run auth, framed for upload.
   if (err instanceof UploadAuthenticationError) {
@@ -524,6 +531,128 @@ function classifyInputPreparationError(
 /** The verbatim server message from a preparation error's wrapped API response, if any. */
 function causeServerMessage(err: { cause?: unknown }): string | undefined {
   return err.cause instanceof ApiResponseError ? err.cause.serverMessage : undefined;
+}
+
+/**
+ * What a refused asset means, by the `code` the SDK sets on every one it raises.
+ * A grant writes one object, once, within minutes, and only the file it was
+ * requested for — so every refusal of an upload with a grant is fixed the same
+ * way from the user's side: drop the file again, which asks for a new grant.
+ */
+function classifyRejectedAsset(err: RejectedAssetError): PipelineError {
+  const details = `${err.name}: ${err.message}\nstatus: ${err.status}\ncode: ${err.code ?? "(none)"}\nfilename: ${err.filename}`;
+  const again = "Drop the file again to upload it with a new permission.";
+  switch (err.code) {
+    case "too_large":
+      return {
+        kind: "upload_failed",
+        title: "The file is too large to store",
+        message: `Pipelex storage refused "${err.filename}" because it is past the service's size limit. Try a smaller file.`,
+        apiMessage: causeServerMessage(err),
+        details,
+      };
+    case "grant_expired":
+    case "grant_used":
+      return {
+        kind: "upload_failed",
+        title: "The upload's permission ran out",
+        message: `Pipelex storage refused "${err.filename}" because the permission to store it had ${err.code === "grant_expired" ? "expired" : "already been used"}. ${again}`,
+        details,
+      };
+    case "signature_mismatch":
+    case "unsigned_header":
+      return {
+        kind: "upload_failed",
+        title: "The file changed before it was stored",
+        message: `Pipelex storage refused "${err.filename}" because it no longer matches the size and type the upload was granted for — it may have changed on disk after it was picked. ${again}`,
+        details,
+      };
+    default:
+      return {
+        kind: "upload_failed",
+        title: "The file was rejected by storage",
+        message: `Pipelex storage refused "${err.filename}" (HTTP ${err.status}). ${again}`,
+        apiMessage: causeServerMessage(err),
+        details,
+      };
+  }
+}
+
+/**
+ * A grant request answered `404`: the configured API does not serve
+ * `POST /v1/upload/grant`, so no file input can be stored. The URL is the
+ * suspect, as for `lifecycle_unavailable`; no replacement URL is suggested,
+ * since which deployments serve the route is theirs to say, not this app's.
+ */
+function classifyUploadUnavailable(err: ApiResponseError, env: ClassifyEnv): PipelineError {
+  const url = err.apiUrl || env.apiUrl || DEFAULT_API_BASE_URL;
+  return {
+    kind: "upload_unavailable",
+    title: "File upload isn't available on this API",
+    message: `${url} doesn't serve upload grants (POST /v1/upload/grant), which this app needs to store a file before a run. Check PIPELEX_BASE_URL.`,
+    hint: {
+      summary:
+        "Point PIPELEX_BASE_URL at a Pipelex API that serves upload grants, then restart the dev server.",
+    },
+    details: `${err.name}: HTTP ${err.status} ${err.statusText}`.trim() + `\nAPI URL: ${url}`,
+  };
+}
+
+/** A grant request the platform refused as too large (`413`): its limit, in its words. */
+function classifyGrantTooLarge(err: ApiResponseError): PipelineError {
+  return {
+    kind: "file_too_large",
+    title: "File too large",
+    message: err.serverMessage ?? "The file is past the size limit of Pipelex storage.",
+    details: `${err.name}: HTTP ${err.status} ${err.statusText}`.trim(),
+  };
+}
+
+/**
+ * Classify a failure of a file's upload **in the browser**, where the upload
+ * runs: `uploadWithGrant` throws the SDK's own classes there, so `instanceof`
+ * holds, unlike for an error that crossed the Server Action boundary.
+ *
+ * - A refusal from storage (`RejectedAssetError`), by its `code`.
+ * - Storage unreachable (`UploadTransportError`), which in a browser includes a
+ *   cross-origin request the bucket or a content-security policy refused.
+ * - The upload's own time limit (`TimeoutError`, the reason of the
+ *   `AbortSignal.timeout` `useFileInputs` passes, which the SDK rethrows as is).
+ * - Anything else is the grant request itself failing to reach this app's
+ *   server, which is the transport error every Server Action call can meet.
+ */
+export function classifyUploadError(err: unknown): PipelineError {
+  if (err instanceof RejectedAssetError) return classifyRejectedAsset(err);
+  if (err instanceof UploadTransportError) {
+    return {
+      kind: "upload_failed",
+      title: "Could not reach Pipelex storage",
+      message:
+        "The browser couldn't send the file to Pipelex storage. The network may have dropped, or a browser extension or the page's security policy may have blocked the request.",
+      hint: { summary: "Drop the file again. If it keeps failing, check the browser console." },
+      details: `${err.name}: ${err.message}${err.status === undefined ? "" : `\nstatus: ${err.status}`}`,
+    };
+  }
+  if (err instanceof Error && err.name === "TimeoutError") {
+    return {
+      kind: "upload_failed",
+      title: "The upload took too long",
+      message:
+        "The file did not finish uploading in the time allowed for its size, so it was abandoned. A slow connection is the usual cause.",
+      hint: { summary: "Drop the file again, or try a smaller one." },
+      details: `${err.name}: ${err.message}`,
+    };
+  }
+  if (err instanceof InputPreparationError) {
+    return {
+      kind: "upload_failed",
+      title: "Uploading the file failed",
+      message:
+        "This app couldn't store the file in Pipelex storage. The technical details below should help track it down.",
+      details: `${err.name}: ${err.message}`,
+    };
+  }
+  return classifyTransportError(err);
 }
 
 function classifyBadOutput(err: BadPipelineOutputError): PipelineError {
