@@ -14,6 +14,7 @@ import {
   UnsupportedUploadCapabilityError,
   UploadAuthenticationError,
   UploadTransportError,
+  type UploadTransportCode,
 } from "@pipelex/sdk";
 import { BadPipelineOutputError } from "@/types/pipelineError";
 import {
@@ -531,16 +532,43 @@ describe("classifyUploadError — a file's upload, in the browser", () => {
     expect(result.details).toContain(`code: ${code}`);
   });
 
-  it("names storage, not this app's server, when storage cannot be reached", () => {
-    const result = classifyUploadError(new UploadTransportError("could not reach storage"));
+  // Every code the SDK can set, so one it adds fails the type check here until
+  // someone decides what it tells the user. The hint is the retry advice, which
+  // only the codes a second drop can cure carry.
+  const TRANSPORT_CODES = {
+    timeout: ["The upload took too long", true],
+    storage_timeout: ["The upload took too long", true],
+    unreachable: ["Could not reach Pipelex storage", true],
+    server_error: ["Pipelex storage could not store the file", true],
+    conflict: ["Uploading the file failed", false],
+    redirected: ["Uploading the file failed", false],
+    invalid_grant_url: ["Uploading the file failed", false],
+    unexpected: ["Uploading the file failed", false],
+  } satisfies Record<UploadTransportCode, readonly [string, boolean]>;
+
+  it.each([
+    ...Object.entries(TRANSPORT_CODES).map(
+      ([code, [title, retry]]) => [code as UploadTransportCode, title, retry] as const,
+    ),
+    [undefined, "Uploading the file failed", false] as const,
+  ])("says what an upload that failed in transit with code %s means", (code, title, retry) => {
+    const result = classifyUploadError(new UploadTransportError("upload failed", { code }));
     expect(result.kind).toBe("upload_failed");
-    expect(result.title).toBe("Could not reach Pipelex storage");
+    expect(result.title).toBe(title);
+    expect(result.hint !== undefined).toBe(retry);
+    expect(result.details).toContain(`code: ${code ?? "(none)"}`);
   });
 
-  it("says an upload ran out of time when its own time limit fired", () => {
-    const result = classifyUploadError(new DOMException("signal timed out", "TimeoutError"));
-    expect(result.kind).toBe("upload_failed");
-    expect(result.title).toBe("The upload took too long");
+  it("keeps the status storage answered with, and claims no outcome the SDK calls unknown", () => {
+    const err = new UploadTransportError("storage answered 503", {
+      status: 503,
+      code: "server_error",
+    });
+    const result = classifyUploadError(err);
+    expect(result.details).toContain("status: 503");
+    // Storage may have written the object before it failed, so the SDK cannot
+    // say whether the file was stored, and neither can the message.
+    expect(result.message).not.toMatch(/not stored|could not be stored/);
   });
 
   it("treats anything else as the grant request failing to reach this app", () => {
