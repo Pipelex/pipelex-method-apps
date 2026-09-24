@@ -218,16 +218,27 @@ describe.skipIf(!IS_TEMPLATE)("bootstrap.mjs against the template's files", SPAW
     expect(read(root, "Makefile")).not.toMatch(/\n\n\n/);
   });
 
-  it("names the create gesture and the mono-repo only in what a project does not keep", () => {
+  it("names the create gesture, the mono-repo and every removed file only in what a project does not keep", () => {
     // Every other mention would describe, in a project, a gesture that is gone,
-    // or a repository the project was never part of.
+    // a repository the project was never part of, or a file that is not there.
+    // A removed file is looked for by its path and, since a relative link names
+    // it by its bare name, by that name too; a directory only by its path.
+    const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const removedNames = REMOVALS.flatMap((rel) =>
+      fs.statSync(path.join(REPO_ROOT, rel)).isDirectory() ? [rel] : [rel, path.basename(rel)],
+    );
+    const removedPattern = new RegExp(
+      `(?<![\\w-])(?:${removedNames.map(escape).join("|")})(?![\\w-])`,
+    );
     const leaks = keptTextFiles().filter((rel) => {
       const text = read(REPO_ROOT, rel);
       let kept = text.includes(TEMPLATE_ONLY_BEGIN) ? stripTemplateOnly(text, rel) : text;
       // The charter paragraph goes too: `make create` always passes --clean.
       if (rel === "CLAUDE.md") kept = stripTemplateParagraph(kept);
-      return /make create|npm run create|scripts\/create\.mts|lib\/create\.mts|pipelex-method-apps|mono-repo/.test(
-        kept,
+      return (
+        /make create|npm run create|scripts\/create\.mts|lib\/create\.mts|pipelex-method-apps|mono-repo/.test(
+          kept,
+        ) || removedPattern.test(kept)
       );
     });
     expect(leaks).toEqual([]);

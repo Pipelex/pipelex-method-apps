@@ -84,8 +84,8 @@ Re-run the exact same command **without** `--dry-run`. The script:
 - writes the title and description into `src/site.ts`
 - applies the license choice to `LICENSE`
 - rewrites `CHANGELOG.md` to a fresh `v0.1.0` entry dated today
-- removes what only the template needs, the `make create` gesture — `scripts/create.mts`, `scripts/lib/create.mts` and its test, and `docs/create.md` — and drops the `create` script from `package.json`
-- strips the template-only passages, which describe that gesture, from the `Makefile`, `CLAUDE.md`, `AGENTS.md` and `docs/ci.md`: each passage sits between a `template-only:begin` line and a `template-only:end` line, and goes with both of them
+- removes what only the template needs — the `make create` gesture (`scripts/create.mts`, `scripts/lib/create.mts` and its test, and `docs/create.md`), the tile e2e with its fixture (`e2e/resultTile.spec.ts` and `e2e/fixtures/generate-image/`), and `docs/chrome-lineage.md`, which governs the template's relation to the gallery it was extracted from — and drops the `create` script from `package.json`
+- strips the template-only passages, which describe what it removes, from the `Makefile`, `CLAUDE.md`, `AGENTS.md`, `docs/ci.md` and `docs/input-form.md`: each passage sits between a `template-only:begin` line and a `template-only:end` line, and goes with both of them
 - formats every file it writes with the repo's Prettier
 
 It deliberately does **not** touch git, run `npm install`, run the checks, add a method, or modify `node_modules/`, `package-lock.json`, `methods/`, `src/generated/` or anything in `.github/`. It also does not remove this skill; Step 6 does.

@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.5.1] - 2026-09-24
+
+### Changed
+
+- **The web app template runs on `@pipelex/mthds-form` 0.10.0**: an enum value in a method's form and result reads as words rather than as its code, a table of records keeps five columns chosen by rank, the record's name first, and opens a row to the whole record, a long name wraps instead of widening the table, and a list of dates shows one date per line. An attached file's card no longer prints a stored file's `pipelex-storage://` address under its name, the "paste a URL instead" input's placeholder reads `https://…`, and the card of a file with no name reads "Attached file".
+- **A created app no longer carries the template's chrome lineage**: the bootstrap that `make create` runs removes `docs/chrome-lineage.md`, which describes the web app template's relation to the gallery it was extracted from and would have sent a project's agent to file tasks against a repository the project has nothing to do with. It also drops `docs/input-form.md`'s paragraph about the template's own live tile spec, which a project does not have.
+
+### Fixed
+
+- **A file input offers only the media types its upload action grants**: a document input used to accept a PNG or a JPEG that the method's upload action then refused. The scaffolded form now narrows each file input to the method's `ALLOWED_MIMES` through the kernel's `narrowFileFormats`, so the input's hint, its file picker and its own check name the list the action checks, and `make add-method` writes that list to `src/types/<camel>Uploads.ts`, which the action and the form both import.
+- **`make format-check` passes beside a gstack cache**: the web app template's `.prettierignore` lists `.gstack/`, which a global gitignore can hide from git but not from Prettier, so the tool's local cache no longer fails the check on an otherwise clean tree.
+
 ## [v0.5.0] - 2026-09-24
 
 ### Highlights

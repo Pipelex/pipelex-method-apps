@@ -33,10 +33,10 @@ That is what keeps the view honest when the method changes. After an edit to the
 
 ## Say things the way a reader would
 
-- **Enum values** get their labels from a map keyed by the enum itself, so adding a value to the method makes a missing label a type error: `const STATUS_LABELS: Record<InvoiceReviewOutput["status"], string> = { … }`.
+- **Enum values** already read as words in the generated view (`hold_for_review` reads "Hold for review"), worded from the code. A view of your own that wants the method's own wording gets its labels from a map keyed by the enum itself, so adding a value to the method makes a missing label a type error: `const STATUS_LABELS: Record<InvoiceReviewOutput["status"], string> = { … }`.
 - **Numbers** go through `Intl.NumberFormat`: grouping, a fixed number of decimals, and the currency when the method's output says which one. A value that is a judgment rather than an amount (a score out of five, a confidence) usually reads better as words or a bar than as a number.
 - **Text the model wrote as Markdown** is rendered with the kernel's own `<Markdown>` component, from `@pipelex/mthds-form/react`, rather than a Markdown library of your own. Mind what it will load: an image in the model's answer, `![](https://…)`, is fetched when the page paints.
-- **A long list of records** shows the few columns a reader decides on, and puts the rest in a detail row or a second view. The generated table shows every field, in the order the concept declares them.
+- **A long list of records** shows the few columns a reader decides on, and puts the rest in a detail row or a second view. The generated table already keeps five columns, chosen by rank — the record's name first, then the fields that fit a cell whole — in the order the concept declares them, and opens a row to the whole record. A view of your own can choose by meaning instead.
 
 ## Files keep the app's URL policy
 
