@@ -4,7 +4,6 @@ Start an app that runs an [MTHDS](https://mthds.ai) method through the [Pipelex]
 
 ```bash
 export PIPELEX_API_KEY=…                               # from app.pipelex.com
-export PIPELEX_BASE_URL=https://api-dev.pipelex.com    # for now, see the template's README
 npm create @pipelex/method-app@latest my-app -- --method ./receipt_review.mthds
 make -C my-app serve
 ```

@@ -29,7 +29,7 @@ This template is developed as the `webapp-js/` directory of the `pipelex-method-
 
 No workflow runs `make create` against the live API, because no workflow is given a Pipelex API key. The fixture test above proves what the gesture writes; that it still works against the API is proven by hand, with a local run, before a release that touches the gesture, the scaffold or the shared code an emitted file imports.
 
-Run it twice against `https://api-dev.pipelex.com`, each time in a fresh copy of this directory with its own `git init`, with a key in the shell:
+Run it twice against the default base URL, `https://api.pipelex.com`, each time in a fresh copy of this directory with its own `git init`, with a key in the shell:
 
 - once with the bundle fixture, `make create METHOD=scripts/lib/fixtures/bundles/receipt-review`;
 - once with a published address, `make create METHOD=github.com/Pipelex/methods/text_stats@v0.1.1`.

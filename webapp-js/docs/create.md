@@ -3,8 +3,7 @@
 A fresh copy of this template is an app with no method, under the template's own name. `make create` turns it into the app for the method you have, in one command:
 
 ```bash
-PIPELEX_API_KEY=… PIPELEX_BASE_URL=https://api-dev.pipelex.com \
-  make create METHOD=path/to/my_method.mthds
+PIPELEX_API_KEY=… make create METHOD=path/to/my_method.mthds
 make dev   # http://127.0.0.1:4300
 ```
 
@@ -75,8 +74,6 @@ A failure after step 1 cannot be undone by running the gesture again, because th
 - **`PIPELEX_API_KEY`** set to the value your shell exports. When the key came from another env file instead, `.env.local` carries no `PIPELEX_API_KEY` line at all, only a comment naming that file, so the file keeps supplying it and the secret is not copied a second time. The gesture reads the env files a production build reads, as every script here does, so that file can be `.env.production` or `.env.production.local`, which `make dev` never opens. In that case the comment and the plan say that the dev server will not see the key, and tell you to put it in `.env` or `.env.development.local` before `make dev`.
 
 The file is created readable by you alone. An existing `.env.local` is yours and is never touched; when your shell exports a base URL the file disagrees with, the plan says so, because the app reads the file whenever the shell does not set the variable.
-
-**On 2026-09-16, the gesture needs `PIPELEX_BASE_URL=https://api-dev.pipelex.com`.** `api.pipelex.com` does not yet serve the input and output form views that codegen needs for every method, nor the `method_ref` selector an address needs. Without the variable, the gesture refuses in its read-only half, naming the missing capability.
 
 ## What it leaves for later
 

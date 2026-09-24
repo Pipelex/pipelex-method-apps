@@ -12,7 +12,6 @@ This template is the `webapp-js/` directory of the [`pipelex-method-apps`](https
 
 ```bash
 export PIPELEX_API_KEY=…                               # from app.pipelex.com
-export PIPELEX_BASE_URL=https://api-dev.pipelex.com    # for now — see below
 npm create @pipelex/method-app@latest my-app -- --method path/to/my_method.mthds
 make -C my-app serve                                   # the URL, once the page answers
 ```
@@ -61,7 +60,7 @@ The command refuses rather than overwriting a slice that already exists, and `DR
 | `PIPELEX_BASE_URL`           | Pipelex API base URL                                                                  | `https://api.pipelex.com` |
 | `NEXT_PUBLIC_EXECUTION_MODE` | Execution mode for every method — `durable` or `blocking`. The page offers no switch. | `durable`                 |
 
-**`make create`, `make add-method`, `npm run codegen` and `npm run codegen:verify` currently need `PIPELEX_BASE_URL=https://api-dev.pipelex.com`.** `api.pipelex.com` does not yet serve the form views codegen asks for, nor the `method_ref` selector a package address needs. Each script names the missing capability rather than failing obscurely. `make all` needs neither a key nor a network.
+**`make create`, `make add-method`, `npm run codegen` and `npm run codegen:verify` need `PIPELEX_API_KEY` and the network.** Each one asks the API for the form views codegen needs and, for a catalog id or a package address, checks that the base URL resolves that kind of method, naming the missing capability when one is not served. `make all` needs neither a key nor a network.
 
 A variable already exported in your shell wins over `.env.local`.
 

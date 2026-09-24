@@ -120,7 +120,7 @@ Finally, give the user a short summary:
 - that the version was reset to `0.1.0`, `CHANGELOG.md` restarted and `README.md` rewritten for the project
 - that `package-lock.json` was re-synced and `make all` passes
 - that **nothing is committed and nothing is staged** — they should review with `git status` and `git diff`, then commit when ready
-- that the app has no method yet, and the page says so: the next step is `make add-method METHOD=<method>`, where the method is a path to a `.mthds` file or to a directory of them (copied into `methods/<name>/`), a catalog id from [app.pipelex.com](https://app.pipelex.com), or a published package address. It needs `PIPELEX_API_KEY` in `.env.local` and, until the production API serves the form views codegen needs, `PIPELEX_BASE_URL=https://api-dev.pipelex.com`. [`docs/add-method.md`](../../../docs/add-method.md) is the reference. Offer to run it with them.
+- that the app has no method yet, and the page says so: the next step is `make add-method METHOD=<method>`, where the method is a path to a `.mthds` file or to a directory of them (copied into `methods/<name>/`), a catalog id from [app.pipelex.com](https://app.pipelex.com), or a published package address. It needs `PIPELEX_API_KEY` in `.env.local`. [`docs/add-method.md`](../../../docs/add-method.md) is the reference. Offer to run it with them.
 
 ## Rules
 

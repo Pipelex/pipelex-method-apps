@@ -5,6 +5,7 @@
 ### Changed
 
 - **The web app template runs on `@pipelex/sdk` 0.24.0**: the SDK now ends a stalled upload by itself, after the limit the template used to set (a minute, plus a second per started 128 KiB of the file), so `useFileInputs` no longer passes a signal and `uploadTimeoutMs` is gone. A failed upload now names its cause from the SDK's code — too slow, storage out of reach, or storage failing — where every such failure used to read as storage being out of reach. A project made from an earlier template keeps working on its own timeout.
+- **The keyed gestures run against the production API**: `make create`, `make add-method`, `npm run codegen` and `npm run codegen:verify` no longer need `PIPELEX_BASE_URL=https://api-dev.pipelex.com`, because `api.pipelex.com` now serves the form views codegen needs and resolves both catalog ids and package addresses. The quickstarts drop that export, so a new project's `.env.local` points at the default base URL; a project that set it can remove the line.
 
 ### Removed
 
