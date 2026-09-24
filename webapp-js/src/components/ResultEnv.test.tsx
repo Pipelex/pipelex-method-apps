@@ -152,6 +152,23 @@ describe("ResultEnv — the URLs a run's payload can reach", () => {
     expect(container.querySelector("iframe")).toBeNull();
   });
 
+  it("frames no data: document, even one of a type the gate admits", () => {
+    // The gate admits a PDF `data:` URL, so this is the framing rule's own
+    // refusal, which the `data:text/html` case above never reaches. The link
+    // proves the gate let it through: were PDF dropped from the gate's list, this
+    // case would fail here rather than pass without reaching the framing rule.
+    const url = "data:application/pdf;base64,JVBERi0xLjQK";
+    const { container } = renderResult(DOCUMENT_FIELD, {
+      url,
+      filename: "report.pdf",
+      mime_type: "application/pdf",
+    });
+
+    expect(screen.getByRole("link", { name: "report.pdf" })).toHaveAttribute("href", url);
+    expect(screen.queryByRole("button", { name: "Preview" })).not.toBeInTheDocument();
+    expect(container.querySelector("iframe")).toBeNull();
+  });
+
   it("paints no SVG data: image, which executes as a document", () => {
     const { container } = renderResult(FIELD, {
       url: "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>",

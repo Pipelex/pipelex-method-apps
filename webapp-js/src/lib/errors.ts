@@ -592,6 +592,59 @@ function classifyRejectedAsset(err: RejectedAssetError): PipelineError {
 }
 
 /**
+ * What an upload that never got storage's verdict means, by the `code` the SDK
+ * sets on it. The codes fold by what the user can do: wait on a faster
+ * connection, check what blocks the request, try again in a moment, or nothing
+ * but report it. The `code:` line in `details` keeps the finer distinction.
+ */
+function classifyUploadTransport(err: UploadTransportError): PipelineError {
+  const details = `${err.name}: ${err.message}${err.status === undefined ? "" : `\nstatus: ${err.status}`}\ncode: ${err.code ?? "(none)"}`;
+  switch (err.code) {
+    case "timeout":
+    case "storage_timeout":
+      return {
+        kind: "upload_failed",
+        title: "The upload took too long",
+        message:
+          err.code === "timeout"
+            ? "The file did not finish uploading in the time allowed for its size, so it was abandoned. A slow connection is the usual cause."
+            : "Pipelex storage stopped waiting for the file's bytes, so nothing was stored. A slow connection is the usual cause.",
+        hint: { summary: "Drop the file again, or try a smaller one." },
+        details,
+      };
+    case "unreachable":
+      return {
+        kind: "upload_failed",
+        title: "Could not reach Pipelex storage",
+        message:
+          "The browser couldn't send the file to Pipelex storage. The network may have dropped, or a browser extension or the page's security policy may have blocked the request.",
+        hint: { summary: "Drop the file again. If it keeps failing, check the browser console." },
+        details,
+      };
+    case "server_error":
+      return {
+        kind: "upload_failed",
+        title: "Pipelex storage could not store the file",
+        message:
+          "Pipelex storage answered with a server error, so the upload may not have completed. This is usually temporary.",
+        hint: { summary: "Drop the file again in a moment." },
+        details,
+      };
+    default:
+      // `conflict`, `redirected`, `invalid_grant_url`, `unexpected`, or no code:
+      // a deployment fault or a path this app never takes, which dropping the
+      // file again cures none of reliably.
+      return {
+        kind: "upload_failed",
+        title: "Uploading the file failed",
+        message:
+          "The upload to Pipelex storage failed. The technical details below should help track it down.",
+        details,
+      };
+  }
+}
+
+/**
  * A grant request answered `404`: the configured API does not serve
  * `POST /v1/upload/grant`, so no file input can be stored. The URL is the
  * suspect, as for `lifecycle_unavailable`; no replacement URL is suggested,
@@ -627,35 +680,16 @@ function classifyGrantTooLarge(err: ApiResponseError): PipelineError {
  * holds, unlike for an error that crossed the Server Action boundary.
  *
  * - A refusal from storage (`RejectedAssetError`), by its `code`.
- * - Storage unreachable (`UploadTransportError`), which in a browser includes a
- *   cross-origin request the bucket or a content-security policy refused.
- * - The upload's own time limit (`TimeoutError`, the reason of the
- *   `AbortSignal.timeout` `useFileInputs` passes, which the SDK rethrows as is).
+ * - An upload that never got storage's verdict (`UploadTransportError`), by its
+ *   `code`: the SDK's own time limit, which grows with the file's size, storage
+ *   out of reach (in a browser, a cross-origin request the bucket or a
+ *   content-security policy refused too), or storage failing.
  * - Anything else is the grant request itself failing to reach this app's
  *   server, which is the transport error every Server Action call can meet.
  */
 export function classifyUploadError(err: unknown): PipelineError {
   if (err instanceof RejectedAssetError) return classifyRejectedAsset(err);
-  if (err instanceof UploadTransportError) {
-    return {
-      kind: "upload_failed",
-      title: "Could not reach Pipelex storage",
-      message:
-        "The browser couldn't send the file to Pipelex storage. The network may have dropped, or a browser extension or the page's security policy may have blocked the request.",
-      hint: { summary: "Drop the file again. If it keeps failing, check the browser console." },
-      details: `${err.name}: ${err.message}${err.status === undefined ? "" : `\nstatus: ${err.status}`}`,
-    };
-  }
-  if (err instanceof Error && err.name === "TimeoutError") {
-    return {
-      kind: "upload_failed",
-      title: "The upload took too long",
-      message:
-        "The file did not finish uploading in the time allowed for its size, so it was abandoned. A slow connection is the usual cause.",
-      hint: { summary: "Drop the file again, or try a smaller one." },
-      details: `${err.name}: ${err.message}`,
-    };
-  }
+  if (err instanceof UploadTransportError) return classifyUploadTransport(err);
   if (err instanceof InputPreparationError) {
     return {
       kind: "upload_failed",
