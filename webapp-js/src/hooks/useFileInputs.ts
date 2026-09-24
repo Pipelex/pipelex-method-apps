@@ -5,7 +5,12 @@ import { setValueAtPath } from "@pipelex/mthds-form";
 // The browser-safe entry: it reaches no Node builtin, so it bundles for the
 // client with nothing marked external.
 import { uploadWithGrant } from "@pipelex/sdk/upload";
-import { classifyTransportError, classifyUploadError, type PipelineError } from "@/lib/errors";
+import {
+  buildFilePreparationError,
+  classifyTransportError,
+  classifyUploadError,
+  type PipelineError,
+} from "@/lib/errors";
 import {
   MAX_FILE_BYTES,
   fileInputErrorToPipelineError,
@@ -147,7 +152,16 @@ export function useFileInputs({
       setFileError(null);
       onSelectionStart?.();
       clearFile(id); // before the size check and before any await
-      const file = prepareFile ? prepareFile(dropped) : dropped;
+      // The host's own code: a throw here must reach the user as a file error,
+      // not escape as a rejection nobody handles — the kernel does not await
+      // `onDropFile`.
+      let file: File;
+      try {
+        file = prepareFile ? prepareFile(dropped) : dropped;
+      } catch (err) {
+        setFileError(buildFilePreparationError(err));
+        return;
+      }
       if (file.size > maxBytes) {
         setFileError(
           fileInputErrorToPipelineError(fileTooLargeError(file.size, maxBytes), file.name),

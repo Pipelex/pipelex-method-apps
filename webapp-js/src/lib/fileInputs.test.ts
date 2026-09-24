@@ -48,7 +48,7 @@ describe("checkUploadRequest", () => {
     ["a size that is not a whole number", { ...request, size: 1.5 }],
     ["a size that is not a number", { ...request, size: "1024" }],
   ])("refuses %s — a Server Action reads untrusted JSON", (_label, bad) => {
-    expect(checkUploadRequest(bad, opts)?.kind).toBe("unsupported_file_type");
+    expect(checkUploadRequest(bad, opts)?.kind).toBe("invalid_file");
   });
 });
 
@@ -304,5 +304,15 @@ describe("fileInputErrorToPipelineError", () => {
     expect(result.kind).toBe("unsupported_file_type");
     expect(result.title).toBe("Unsupported file type");
     expect(result.details).toContain("(no filename)");
+  });
+
+  it("titles an empty or nameless file as one that can't be uploaded, not as a wrong type", () => {
+    const result = fileInputErrorToPipelineError(
+      { kind: "invalid_file", message: "The file is empty." },
+      "blank.pdf",
+    );
+    expect(result.kind).toBe("invalid_file");
+    expect(result.title).toBe("File can't be uploaded");
+    expect(result.message).toBe("The file is empty.");
   });
 });

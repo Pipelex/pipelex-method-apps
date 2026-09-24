@@ -13,7 +13,12 @@ import { resultsFromExecute, type PipelexStartOptions, type RunResults } from "@
 
 export type BlockingOutcome<T> =
   | { ok: true; output: T; usage: UsageReport; runId: string }
-  | { ok: false; error: PipelineError };
+  /**
+   * `runId` is set when the run finished but its result could not be read —
+   * no locatable main stuff, or an output the narrower refused — so the error
+   * can still name the run. Absent when no run was made.
+   */
+  | { ok: false; error: PipelineError; runId?: string };
 
 /**
  * Run a pipeline the **blocking** way — one synchronous `POST /v1/execute` —
@@ -38,25 +43,24 @@ export async function executeBlockingRun<T>(
   buildOptions: () => Promise<PipelexStartOptions>,
   parse: (results: RunResults) => T,
 ): Promise<BlockingOutcome<T>> {
+  let runId: string | undefined;
   try {
     const options = await buildOptions();
     const response = await getPipelexClient().execute(options);
-    const results = resultsFromExecute(response);
+    runId = response.pipeline_run_id;
     // The durable path logs a run's id when it starts; a blocking run has no id
-    // until it has finished, so it is logged here, and every run this app makes
-    // is in the server's log whichever mode made it. It is not a diagnostic: it
-    // is the handle a user quotes, and the one a run is looked up by once the
-    // page is closed (see `durableRun.ts`).
+    // until it has finished, so it is logged here, before its result is read,
+    // and every run this app makes is in the server's log whichever mode made
+    // it and whether or not its result could be read. It is not a diagnostic:
+    // it is the handle a user quotes, and the one a run is looked up by once
+    // the page is closed (see `durableRun.ts`).
     // eslint-disable-next-line no-console
-    console.info(`[pipelex] run finished: ${response.pipeline_run_id}`);
-    return {
-      ok: true,
-      output: parse(results),
-      usage: buildUsageReport(results),
-      runId: response.pipeline_run_id,
-    };
+    console.info(`[pipelex] run finished: ${runId}`);
+    const results = resultsFromExecute(response);
+    return { ok: true, output: parse(results), usage: buildUsageReport(results), runId };
   } catch (err) {
     // `blocking: true` maps the gateway's 502/504 cap response to execute_timeout.
-    return { ok: false, error: classifyPipelineError(err, readClassifyEnv(), { blocking: true }) };
+    const error = classifyPipelineError(err, readClassifyEnv(), { blocking: true });
+    return runId === undefined ? { ok: false, error } : { ok: false, error, runId };
   }
 }

@@ -1,11 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // No `serverActions.bodySizeLimit`: the 1 MB default fits every request this
-  // app makes. A dropped file goes from the browser straight to Pipelex storage
-  // with an upload grant (src/hooks/useFileInputs.ts), so a Server Action only
-  // ever receives a file's name, type and size, and a run only references. The
-  // limit used to be raised for files sent inline as base64, which is what a
-  // list of photos outgrew; keeping the default refuses such a body outright.
+  // No `serverActions.bodySizeLimit`: Server Actions keep Next's 1 MB default.
+  // A dropped file goes from the browser straight to Pipelex storage with an
+  // upload grant (src/hooks/useFileInputs.ts), so a grant action only receives
+  // a file's name, type and size, and a run only references. What can still
+  // reach the limit is a run's text and other typed values, so `useRun`
+  // measures them first and refuses a set past `MAX_RUN_INPUT_BYTES`
+  // (src/lib/runRequest.ts) with the size and the limit, rather than let Next
+  // refuse the body where the browser would only see an unreachable server.
+  // Raise both together; a test holds them to each other.
   // The floating badge `next dev` draws on every page. The app is what its
   // developer shows people, and the badge is chrome of Next's, not of the app.
   // Next still surfaces compile and runtime errors with it off.

@@ -26,6 +26,13 @@ export type GrantOutcome = { ok: true; grant: UploadGrant } | { ok: false; error
  * **The grant is a bearer capability**: until it expires, whoever holds it can
  * create that one object. It goes to the browser that asked, and nowhere else —
  * never into a log.
+ *
+ * **A grant action is a public endpoint**, and it lets anyone who can reach the
+ * app store a file in the deployment's organisation. It is open in this
+ * template for the reason the assets route is — see `mayRead` in
+ * `src/app/api/assets/[...path]/route.ts` — and a deployment serving more than
+ * one person has to answer the same question in the action before asking for a
+ * grant.
  */
 export async function grantFileUpload(
   request: unknown,

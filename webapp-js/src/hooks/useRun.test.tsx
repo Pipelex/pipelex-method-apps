@@ -78,7 +78,25 @@ describe("useRun — blocking", () => {
 
     act(() => result.current.run("in"));
     await flush();
-    expect(result.current.state).toMatchObject({ phase: "error", error: { kind: "bad_request" } });
+    expect(result.current.state).toMatchObject({
+      phase: "error",
+      error: { kind: "bad_request" },
+      runId: null,
+    });
+  });
+
+  it("keeps the id of a run that finished but could not be read", async () => {
+    const blocking = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      error: { kind: "bad_response", title: "T", message: "m", details: "d" },
+      runId: "run-unread",
+    });
+    const cfg = makeCfg({ mode: "blocking", blocking });
+    const { result } = renderHook(() => useRun(cfg));
+
+    act(() => result.current.run("in"));
+    await flush();
+    expect(result.current.state).toMatchObject({ phase: "error", runId: "run-unread" });
   });
 
   it("a rejected blocking await becomes a transport error (not a thrown boundary)", async () => {
@@ -93,6 +111,32 @@ describe("useRun — blocking", () => {
       error: { kind: "transport_error" },
     });
   });
+});
+
+describe("useRun — inputs too large to send", () => {
+  // A string whose JSON is past the limit: files aside, this is what a form
+  // carries when a long text is pasted into it.
+  const LONG_TEXT = "x".repeat(1_100_000);
+
+  for (const mode of ["blocking", "durable"] as const) {
+    it(`refuses them before calling the ${mode} action, saying why`, async () => {
+      const blocking = vi.fn();
+      const start = vi.fn();
+      const cfg = makeCfg({ mode, blocking, start });
+      const { result } = renderHook(() => useRun(cfg));
+
+      act(() => result.current.run(LONG_TEXT));
+      await flush();
+
+      expect(blocking).not.toHaveBeenCalled();
+      expect(start).not.toHaveBeenCalled();
+      expect(result.current.state).toMatchObject({
+        phase: "error",
+        error: { kind: "inputs_too_large" },
+        runId: null,
+      });
+    });
+  }
 });
 
 describe("useRun — durable", () => {

@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 
 /** The hook over a plain values object, the way a form's `useRunInputs` holds one. */
-function setup(maxBytes?: number) {
+function setup(maxBytes?: number, prepareFile?: (file: File) => File) {
   const state: { values: Record<string, unknown> } = {
     values: { receipts: [{ url: "pipelex-storage://org_1/assets/old.jpg", filename: "old.jpg" }] },
   };
@@ -35,7 +35,7 @@ function setup(maxBytes?: number) {
   };
   const onSelectionStart = vi.fn();
   const hook = renderHook(() =>
-    useFileInputs({ setValues, requestUpload, onSelectionStart, maxBytes }),
+    useFileInputs({ setValues, requestUpload, onSelectionStart, maxBytes, prepareFile }),
   );
   return { hook, state, onSelectionStart };
 }
@@ -139,6 +139,23 @@ describe("useFileInputs", () => {
     expect(hook.result.current.fileError).toMatchObject({ kind: "file_too_large" });
     expect(requestUpload).not.toHaveBeenCalled();
     expect(firstReceipt(state.values)).toBeUndefined();
+  });
+
+  it("shows a throwing prepareFile as a file error, and asks for nothing", async () => {
+    const { hook, state } = setup(undefined, () => {
+      throw new Error("cannot re-wrap");
+    });
+
+    await act(() => hook.result.current.dropFile("receipts.0", receipt()));
+
+    expect(hook.result.current.fileError).toMatchObject({
+      kind: "upload_failed",
+      title: "The file could not be prepared",
+      details: "Error: cannot re-wrap",
+    });
+    expect(requestUpload).not.toHaveBeenCalled();
+    expect(firstReceipt(state.values)).toBeUndefined();
+    expect(hook.result.current.uploadingIds.size).toBe(0);
   });
 
   it("reports a grant request that never reached the server as a transport error", async () => {

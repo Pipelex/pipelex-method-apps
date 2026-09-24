@@ -18,6 +18,7 @@ import {
 import { BadPipelineOutputError } from "@/types/pipelineError";
 import {
   buildClientTimeoutError,
+  buildInputsTooLargeError,
   classifyPipelineError,
   classifyTransportError,
   classifyUploadError,
@@ -366,11 +367,13 @@ describe("classifyPipelineError — unknown fallback", () => {
 });
 
 describe("classifyPipelineError — run-lifecycle errors", () => {
-  it("classifies PipelineExecuteTimeoutError into execute_timeout pointing at Durable mode", () => {
+  it("classifies PipelineExecuteTimeoutError into execute_timeout, pointing the deployment at durable runs", () => {
     const result = classifyPipelineError(new PipelineExecuteTimeoutError(31_000), OVERRIDE_ENV);
     expect(result.kind).toBe("execute_timeout");
     expect(result.title).toMatch(/30s/);
-    expect(result.hint?.summary).toMatch(/Durable/i);
+    // The page has no mode switch: the remedy is the deployment's variable.
+    expect(result.hint?.summary).not.toMatch(/Switch to Durable mode/);
+    expect(result.hint?.code).toBe("NEXT_PUBLIC_EXECUTION_MODE=durable");
   });
 
   it("maps a blocking-path 502/504 gateway response to execute_timeout", () => {
@@ -552,6 +555,18 @@ describe("buildClientTimeoutError", () => {
     expect(result.kind).toBe("run_timeout");
     expect(result.title).toMatch(/Stopped waiting/i);
     expect(result.message).toContain("150s");
+  });
+});
+
+describe("buildInputsTooLargeError", () => {
+  it("says how large the inputs are and what the limit is, and that files do not count", () => {
+    const result = buildInputsTooLargeError(1_534_000, 1_000_000);
+    expect(result.kind).toBe("inputs_too_large");
+    expect(result.title).toMatch(/too large/i);
+    expect(result.message).toContain("1.5 MB");
+    expect(result.message).toContain("at most 1 MB");
+    expect(result.message).toMatch(/Files don't count/);
+    expect(result.details).toBe("inputs_too_large: 1534000 bytes, limit 1000000 bytes");
   });
 });
 

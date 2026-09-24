@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { buildClientTimeoutError, classifyTransportError, type PipelineError } from "@/lib/errors";
+import {
+  buildClientTimeoutError,
+  buildInputsTooLargeError,
+  classifyTransportError,
+  type PipelineError,
+} from "@/lib/errors";
+import { MAX_RUN_INPUT_BYTES, runInputBytes } from "@/lib/runRequest";
 import type { ExecutionMode } from "@/config";
 import type { UsageReport } from "@/lib/usageReport";
 import type { BlockingOutcome } from "@/lib/blockingRun";
@@ -178,11 +184,26 @@ export function useRun<TInput, TOutput>(
         setState({ phase: "done", output, usage, runId: finishedRunId });
       };
 
+      // Past what one Server Action body may carry, Next refuses the call
+      // before the action runs, and the rejection would read as "Could not
+      // reach the server". Refuse it here instead, saying why.
+      const inputBytes = runInputBytes(input);
+      if (inputBytes !== null && inputBytes > MAX_RUN_INPUT_BYTES) {
+        fail(buildInputsTooLargeError(inputBytes, MAX_RUN_INPUT_BYTES));
+        return;
+      }
+
       if (mode === "blocking") {
         blocking(input)
           .then((outcome) => {
-            if (outcome.ok) succeed(outcome.output, outcome.usage, outcome.runId);
-            else fail(outcome.error);
+            if (outcome.ok) {
+              succeed(outcome.output, outcome.usage, outcome.runId);
+              return;
+            }
+            // A run that finished but could not be read still has an id, and
+            // it is the one a user needs to quote.
+            runId = outcome.runId ?? null;
+            fail(outcome.error);
           })
           .catch((err) => fail(classifyTransportError(err)));
         return;

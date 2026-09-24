@@ -772,11 +772,13 @@ function collectFiles(node: InputFormItem, at: string, out: FileInput[]): void {
  * Every file position a pipe's inputs declare, in descriptor order.
  *
  * Any one of them gives the slice the whole file-input path: the browser
- * encodes through `useFileInputs` (the kernel's list and object controls hand
- * a nested file to the same `onDropFile` seam, at its dotted id), the action
- * gates every position with `checkFileInputs` — which walks this same
- * descriptor — and `prepareInputs` uploads them. Depth does not change the
- * shape of what is scaffolded, only the media types the gate accepts.
+ * stores each dropped file in Pipelex storage through `useFileInputs` and the
+ * method's grant action (the kernel's list and object controls hand a nested
+ * file to the same `onDropFile` seam, at its dotted id), the run action gates
+ * every position with `checkFileInputs` — which walks this same descriptor —
+ * and `prepareInputs` passes the stored references through. Depth does not
+ * change the shape of what is scaffolded, only the media types the grant
+ * action accepts.
  */
 export function fileInputsOf(descriptor: PipeInputFormDescriptor): FileInput[] {
   const files: FileInput[] = [];
@@ -1176,6 +1178,11 @@ export function renderAction(plan: ScaffoldPlan): string {
       " * past `MAX_FILE_BYTES`, then asks the platform for a create-only `PUT` signed",
       " * for exactly that file. The form's `useFileInputs` sends the file with it and",
       " * keeps the `pipelex-storage://` reference the run then carries.",
+      " *",
+      " * It is open to anyone who can reach the app, like the run actions, and for",
+      " * the same single-tenant reason as the assets route: see `mayRead` in",
+      " * `src/app/api/assets/[...path]/route.ts`. A deployment serving more than one",
+      " * person answers the same question here before granting anything.",
       " */",
       `export async function request${names.pascal}Upload(request: UploadRequest): Promise<GrantOutcome> {`,
       "  return grantFileUpload(request, { allowedMimes: ALLOWED_MIMES, maxBytes: MAX_FILE_BYTES });",

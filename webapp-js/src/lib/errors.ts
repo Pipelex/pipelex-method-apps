@@ -48,7 +48,8 @@ export type PipelineErrorKind =
   // Pipelex storage with an upload grant (`useFileInputs`), and that can fail in
   // a few distinct, actionable ways — classified from `InputPreparationError` and
   // its subclasses into one kind with subclass-tailored copy, on the server by
-  // `classifyPipelineError` and in the browser by `classifyUploadError`.
+  // `classifyPipelineError` and in the browser by `classifyUploadError` — or by
+  // `buildFilePreparationError`, when the host's own `prepareFile` throws.
   | "upload_failed"
   // The configured API does not serve `POST /v1/upload/grant`, so a file cannot
   // be stored at all. Classified by `classifyPipelineError` with `uploadGrant`.
@@ -60,6 +61,12 @@ export type PipelineErrorKind =
   // They are valid kinds so `<ErrorDisplay>` renders them.
   | "file_too_large"
   | "unsupported_file_type"
+  | "invalid_file"
+  // The run's inputs, files aside, are past what one Server Action body may
+  // carry. Built inline by `useRun` before it calls the action
+  // (`buildInputsTooLargeError`), because Next refuses such a body before the
+  // action runs and the browser would see only a transport error.
+  | "inputs_too_large"
   | "unknown";
 
 export interface ErrorHint {
@@ -329,16 +336,27 @@ function classifyClientAuth(err: ClientAuthenticationError, env: ClassifyEnv): P
   };
 }
 
+/**
+ * The remedy for a run too long to await in one request. The page has no mode
+ * switch: the mode is the deployment's (`EXECUTION_MODE` in `src/config.ts`), so
+ * the hint is addressed to whoever runs the app and names what to change. These
+ * errors only arise in blocking mode, so they only ever meet a deployment that
+ * set the variable.
+ */
+const USE_DURABLE_RUNS_HINT: ErrorHint = {
+  summary:
+    "This app runs in blocking mode, which waits for the whole run in one request. Whoever runs the app can switch it to durable runs, which start the run and poll for its result so long pipelines survive the cap: against an API that serves them, remove NEXT_PUBLIC_EXECUTION_MODE or set it as below, then rebuild or restart the app.",
+  code: "NEXT_PUBLIC_EXECUTION_MODE=durable",
+  codeLanguage: "env",
+};
+
 function classifyExecuteTimeout(err: PipelineExecuteTimeoutError): PipelineError {
   const seconds = Math.round(err.elapsedMs / 1000);
   return {
     kind: "execute_timeout",
     title: "Pipeline exceeded the ~30s blocking limit",
     message: `The blocking request ran for ~${seconds}s before timing out at the hosted gateway's ~30s synchronous limit. The pipeline isn't broken — it's just too long to await synchronously behind the hosted gateway.`,
-    hint: {
-      summary:
-        "Switch to Durable mode. It starts the run and polls for the result, so long pipelines survive the cap.",
-    },
+    hint: USE_DURABLE_RUNS_HINT,
     details: `${err.name}: ${err.message}`,
   };
 }
@@ -349,7 +367,7 @@ function classifyExecuteTimeout(err: PipelineExecuteTimeoutError): PipelineError
  * the request") rather than dropping the connection — so the SDK raises
  * `ApiResponseError`, not `PipelineExecuteTimeoutError`. Same user meaning as
  * `classifyExecuteTimeout` (kind `execute_timeout`): blocking is too long here,
- * switch to Durable. Only reached on the blocking path (see `ClassifyOptions`).
+ * and durable runs are the remedy. Only reached on the blocking path (see `ClassifyOptions`).
  */
 function classifyBlockingGatewayTimeout(err: ApiResponseError): PipelineError {
   const detailsLines = [
@@ -360,10 +378,7 @@ function classifyBlockingGatewayTimeout(err: ApiResponseError): PipelineError {
     kind: "execute_timeout",
     title: "Pipeline exceeded the ~30s blocking limit",
     message: `The hosted gateway returned HTTP ${err.status} because the blocking request didn't finish in time — synchronous runs are cut off at ~30s here. The pipeline isn't broken; it's just too long to await synchronously.`,
-    hint: {
-      summary:
-        "Switch to Durable mode. It starts the run and polls for the result, so long pipelines survive the cap.",
-    },
+    hint: USE_DURABLE_RUNS_HINT,
     details: detailsLines.join("\n"),
   };
 }
@@ -375,9 +390,7 @@ function classifyRunStillRunning(err: RunStillRunningError): PipelineError {
     kind: "run_still_running",
     title: "The run is still going",
     message: `The blocking request was accepted, but the run hasn't finished — the server returned run id ${err.runId} instead of a result. Behind the hosted gateway, a long run can't be awaited synchronously.`,
-    hint: {
-      summary: "Switch to Durable mode to start the run and poll it to completion.",
-    },
+    hint: USE_DURABLE_RUNS_HINT,
     details: `${err.name}: ${err.message}${retry}${location}`,
   };
 }
@@ -655,6 +668,24 @@ export function classifyUploadError(err: unknown): PipelineError {
   return classifyTransportError(err);
 }
 
+/**
+ * A host's `prepareFile` (see `useFileInputs`) threw before the upload began, so
+ * nothing was sent. Not a transport error: the browser never tried to reach
+ * anything, and saying so would send the user after the wrong cause.
+ */
+export function buildFilePreparationError(err: unknown): PipelineError {
+  const message = err instanceof Error ? err.message : String(err);
+  const name = err instanceof Error ? err.name : "Unknown";
+  return {
+    kind: "upload_failed",
+    title: "The file could not be prepared",
+    message:
+      "This app could not prepare the file for upload, so nothing was sent. The technical details below should help track it down.",
+    hint: { summary: "Try another file, or the same file saved again." },
+    details: `${name}: ${message}`,
+  };
+}
+
 function classifyBadOutput(err: BadPipelineOutputError): PipelineError {
   return {
     kind: "bad_response",
@@ -726,6 +757,26 @@ export function buildClientTimeoutError(elapsedMs: number): PipelineError {
         "Re-run to start fresh. Very long pipelines may need a higher poll ceiling (the maxDurationMs passed to useRun).",
     },
     details: `Client poll ceiling reached after ~${seconds}s.`,
+  };
+}
+
+/**
+ * Build an `inputs_too_large` PipelineError for a run whose inputs, files aside,
+ * are past `MAX_RUN_INPUT_BYTES` (`src/lib/runRequest.ts`). Built inline on the
+ * client by `useRun`, before the Server Action is called: Next would refuse the
+ * body before the action ran, and the browser would only see a rejected call.
+ */
+export function buildInputsTooLargeError(bytes: number, maxBytes: number): PipelineError {
+  const megabytes = (n: number) => {
+    const value = n / 1_000_000;
+    return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  };
+  return {
+    kind: "inputs_too_large",
+    title: "The inputs are too large to send",
+    message: `The inputs come to ${megabytes(bytes)} MB, and this app sends at most ${megabytes(maxBytes)} MB in one run. Files don't count toward it: the limit is on text and other values typed or pasted into the form.`,
+    hint: { summary: "Shorten the longest text and run again." },
+    details: `inputs_too_large: ${bytes} bytes, limit ${maxBytes} bytes`,
   };
 }
 

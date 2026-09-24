@@ -33,9 +33,12 @@ import type { InputFormItem, PipeInputFormDescriptor } from "@pipelex/sdk";
  */
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
-/** A refused file: too large, not an accepted type, or not described at all. */
+/**
+ * A refused file: too large, not an accepted type, or not a file that can be
+ * sent at all — no name, or nothing in it.
+ */
 export type FileInputError = {
-  kind: "file_too_large" | "unsupported_file_type";
+  kind: "file_too_large" | "unsupported_file_type" | "invalid_file";
   message: string;
 };
 
@@ -81,7 +84,7 @@ export function checkUploadRequest(
 ): FileInputError | null {
   const { filename, content_type: type, size } = (request ?? {}) as Partial<UploadRequest>;
   if (typeof filename !== "string" || filename.length === 0) {
-    return { kind: "unsupported_file_type", message: "The file has no name." };
+    return { kind: "invalid_file", message: "The file has no name." };
   }
   if (typeof type !== "string" || !opts.allowedMimes.includes(type)) {
     const stated = typeof type === "string" && type.length > 0 ? `"${type}"` : "an unknown type";
@@ -91,7 +94,7 @@ export function checkUploadRequest(
     };
   }
   if (typeof size !== "number" || !Number.isSafeInteger(size) || size <= 0) {
-    return { kind: "unsupported_file_type", message: "The file is empty." };
+    return { kind: "invalid_file", message: "The file is empty." };
   }
   if (size > opts.maxBytes) return fileTooLargeError(size, opts.maxBytes);
   return null;
@@ -271,6 +274,12 @@ export function checkFileInputs(
   return null;
 }
 
+const FILE_ERROR_TITLES: Record<FileInputError["kind"], string> = {
+  file_too_large: "File too large",
+  unsupported_file_type: "Unsupported file type",
+  invalid_file: "File can't be uploaded",
+};
+
 /**
  * Render a `FileInputError` as a `PipelineError` for `<ErrorDisplay>`. The title
  * says "File", not "PDF": the gates are generic over whatever a method declares,
@@ -282,7 +291,7 @@ export function fileInputErrorToPipelineError(
 ): PipelineError {
   return {
     kind: fileError.kind,
-    title: fileError.kind === "file_too_large" ? "File too large" : "Unsupported file type",
+    title: FILE_ERROR_TITLES[fileError.kind],
     message: fileError.message,
     details: `${fileError.kind}: ${filename || "(no filename)"}`,
   };
