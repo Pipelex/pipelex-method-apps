@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [v0.5.0] - 2026-09-24
+
+### Highlights
+
+**The app is for the person running the method.** The web app template's page no longer offers a choice of execution mode, which is now the deployment's, and a finished run keeps its id under the result with its cost folded away. **A dropped file goes straight from the browser to Pipelex storage**, so a form takes as many files as its method does and a run carries only references. The template also moves to `@pipelex/sdk` 0.23.0.
 
 ### Added
 
