@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+
+- **The result view's own URL policy**: the web app template no longer runs a result through `scrubResultUrls` before the form kernel renders it, nor shows the note naming the file references that policy removed, because the kernel's own URL gate has refused what it was written to refuse since 0.9.0. A file URL the policy removed and the kernel accepts now renders: a cleartext `http:` URL, a GIF, AVIF or PDF `data:` URL, a `blob:` URL, or a same-origin path named in the payload, which is painted and linked but never framed. A file the kernel refuses is named by the kernel's own file card, and `docs/result-view.md` now tells a view of the method's own to judge a URL with the kernel's `viewableUrl`. A project made from an earlier template can delete its `src/lib/resultUrls.ts` the same way only once it runs `@pipelex/mthds-form` 0.9.0 or later: the 0.8 kernel frames a payload's `data:text/html` document in an unsandboxed frame, where its script runs and draws its own interface inside the app's page, though from an opaque origin that cannot read the app's cookies or DOM.
+
 ## [v0.5.1] - 2026-09-24
 
 ### Changed
