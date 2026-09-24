@@ -5,6 +5,7 @@
  *   the root of a repository with no commit → the pristine commit, its first
  *     … whose index already holds an entry → refused: repository-has-staged-files
  *   the root of a repository with history  → refused: repository-has-history
+ *   where another repository ignores it    → a new repository on main, then the pristine commit
  *   inside another repository's work tree  → no repository and no commit
  *   inside a checkout of a template        → refused: inside-template-checkout
  *
@@ -16,7 +17,10 @@
  * inside another one's work tree makes the enclosing one fail `git add -A`
  * until the nested one has a commit, and then see an embedded repository, so
  * the project becomes new files in the enclosing repository instead, as
- * `create-next-app` does.
+ * `create-next-app` does. A path the enclosing repository ignores is the
+ * exception: a repository nested there is as invisible to it as plain files
+ * would be, and without one the project would be under no version control at
+ * all, so it gets a repository of its own, as outside every work tree.
  */
 
 import { spawnSync } from "node:child_process";
@@ -66,6 +70,7 @@ export function git(args, { cwd, env }) {
  *   { kind: "outside" }
  *   { kind: "template-checkout", origin }
  *   { kind: "root", history: boolean, staged: string[] }   `staged` is read only when there is no history
+ *   { kind: "ignored", toplevel }   the repository whose work tree it is in ignores it
  *   { kind: "inside", toplevel }
  *   { kind: "unreadable-git" }   the destination holds a `.git` git does not read as its repository
  */
@@ -88,7 +93,31 @@ export function readGit({ dest, from, destExists, destHasGit, env }) {
     }
     if (destHasGit) return { kind: "unreadable-git" };
   }
+  if (ignores({ dest, from, env })) return { kind: "ignored", toplevel: top.stdout };
   return { kind: "inside", toplevel: top.stdout };
+}
+
+/**
+ * Whether the repository `from` stands in ignores `dest`, by every source git
+ * reads: its `.gitignore` files, its `info/exclude` and the user's
+ * `core.excludesFile`.
+ *
+ * The path is named relative to `from` and read as a directory, with a
+ * trailing slash, because a destination that does not exist yet cannot tell git
+ * it is one: without the slash a directory-only pattern such as `build/` misses
+ * it, and one re-included by `!apps/my-app/` after `apps/*` reads as ignored.
+ * It starts with `./` because git reads a leading `:` as pathspec magic, and it
+ * is not passed with `--literal-pathspecs`, which `check-ignore` refuses. Any
+ * answer but a plain yes reads as not ignored, since mistaking a tracked
+ * destination for an ignored one would plant a repository in the user's
+ * tracked tree. A directory that holds a tracked path reads as not ignored
+ * whatever the patterns say, but a destination the preflight accepts holds
+ * none.
+ */
+function ignores({ dest, from, env }) {
+  const relative = path.relative(from, dest).split(path.sep).join("/");
+  const spec = relative === "" ? "./" : `./${relative}/`;
+  return git(["check-ignore", "-q", "--", spec], { cwd: from, env }).status === 0;
 }
 
 /** The `origin` of the repository `from` stands in when it is a template's own, or null. */
@@ -107,12 +136,18 @@ export function hasIdentity({ cwd, env }) {
 
 /**
  * Whether git can name an author and a committer for the commit in the
- * repository about to be made at `dest`, which `from`, the destination or its
- * nearest existing ancestor, stands outside of. Outside a repository git reads
- * no `includeIf "gitdir:…"` section, so an identity given only to the
- * repositories under a directory is invisible from `from`. When that reading
- * finds none, the question is asked again inside a throwaway repository made
- * at `dest`, and what the probe made is removed before the answer is returned.
+ * repository about to be made at `dest`. `from` is the destination or its
+ * nearest existing ancestor, and `enclosed` says whether it lies in the work
+ * tree of a repository that ignores the destination.
+ *
+ * Outside every repository, an identity git shows from `from` is one the new
+ * repository will see too, but git reads no `includeIf "gitdir:…"` section
+ * there, so an identity given only to the repositories under a directory is
+ * invisible from `from`. When that reading finds none, and always when `from`
+ * is enclosed, since it would then read the enclosing repository's own
+ * configuration, which the new repository does not inherit, the question is
+ * asked inside a throwaway repository made at `dest`, and what the probe made
+ * is removed before the answer is returned.
  *
  * It removes only what it made, as the write does. Each missing directory and
  * the `.git` are made without `recursive`, so a path that stands there already,
@@ -122,8 +157,8 @@ export function hasIdentity({ cwd, env }) {
  * process writes into one meanwhile stays. A probe that cannot be made
  * answers no.
  */
-export function hasIdentityForInit({ dest, from, env }) {
-  if (hasIdentity({ cwd: from, env })) return true;
+export function hasIdentityForInit({ dest, from, enclosed, env }) {
+  if (!enclosed && hasIdentity({ cwd: from, env })) return true;
   const missing = [];
   for (let at = dest; at !== from && path.dirname(at) !== at; at = path.dirname(at)) {
     missing.unshift(at);

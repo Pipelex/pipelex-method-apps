@@ -357,6 +357,26 @@ describe("a run", () => {
     );
   });
 
+  it("names the repository that ignores the destination in its git outcome", async () => {
+    const { root, work } = workspace();
+    const env = runEnv(root);
+    git(work, ["init", "-q"], env);
+    fs.writeFileSync(path.join(work, ".gitignore"), "tmp/\n");
+    fs.mkdirSync(path.join(work, "tmp"));
+    const { output, verdict } = await runInitializer(["tmp/app", "--no-create"], {
+      cwd: work,
+      env,
+    });
+    assert.equal(verdict, "copied", output);
+    const said = output.trimEnd().split("\n").at(-2);
+    const expected = `git: ${work} ignores ${path.join(work, "tmp", "app")}, so the project got a repository of its own: made on main, with the template committed as `;
+    assert.ok(said.startsWith(expected), said);
+    assert.match(
+      said,
+      /as [0-9a-f]{12}, "Start from Pipelex\/pipelex-method-apps\/webapp-js .*"\.$/,
+    );
+  });
+
   it("names the copy and the next make create after --no-create", async () => {
     const { root, work } = workspace();
     const { output } = await runInitializer(["my app", "--no-create", "--title", "Bob's app"], {

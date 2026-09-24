@@ -46,10 +46,13 @@ The initializer reads git before it writes anything:
 | A repository with no commit yet (a `git init` by hand, or a clone of an empty GitHub repository) | The pristine commit, as its first                                                                                                |
 | A repository with no commit whose index already holds a file, added and then deleted             | Refused: the commit would record that file beside the template                                                                   |
 | A repository with commits, holding only `.git`                                                   | Refused: every tracked file would show as deleted, and the commit would record that                                              |
+| Inside another repository's work tree, at a path it ignores                                      | A new repository on `main`, then the pristine commit: that repository does not see the project                                   |
 | Inside another repository's work tree                                                            | No repository and no commit: the project is new files in that repository. `--no-create` lets you commit the template there first |
 | Inside a checkout of `pipelex-method-apps` or of a starter                                       | Refused, `--no-git` included whenever git is on the PATH                                                                         |
 
-A commit needs a git identity, and a missing one is refused before anything is written. When git shows none outside a repository, the initializer asks again inside a throwaway repository at the destination, which it removes before going on, so an identity given only by an `includeIf "gitdir:…"` section is found.
+A path the enclosing repository ignores, such as a `tmp/` its `.gitignore` lists or anywhere under a home directory kept as a repository that ignores `*`, is one it does not version, so a project there gets a repository of its own rather than no version control at all. Every source git reads counts: the enclosing repository's `.gitignore` files, its `.git/info/exclude`, and your `core.excludesFile`.
+
+A commit needs a git identity, and a missing one is refused before anything is written. When git shows none outside a repository, the initializer asks again inside a throwaway repository at the destination, which it removes before going on, so an identity given only by an `includeIf "gitdir:…"` section is found. At a path another repository ignores, it always asks inside that throwaway repository, since an identity set in the enclosing repository's own configuration does not reach the new one.
 
 The pristine commit reads `Start from Pipelex/pipelex-method-apps/webapp-js <version> (<sha>)`, so `make create`'s changes are a diff you can read before committing them. `make create` itself commits nothing.
 

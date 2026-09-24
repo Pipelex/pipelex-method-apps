@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **`create-method-app` at a path another repository ignores**: a destination inside another repository's work tree that the repository ignores, such as a `tmp/` its `.gitignore` lists or anywhere under a home directory kept as a repository that ignores `*`, now gets a repository of its own on `main` with the pristine commit, and the `git:` line names the repository that ignores it. The initializer used to report such a project as new files in the enclosing repository and make no repository, which left it under no version control at all. A project made that way earlier can be given one with `git init` and a first commit.
+
 ## [v0.5.3] - 2026-09-24
 
 ### Changed

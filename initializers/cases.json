@@ -3,16 +3,16 @@
   "legend": {
     "destination": "What stands at the destination before the run. missing: nothing; empty: an empty directory; git-without-commit: a directory holding only the .git of git init; git-with-history: a directory holding only the .git of a repository with a commit, its files deleted; git-with-staged-file: a directory holding only the .git of git init whose index holds notes.txt, added and then deleted from the directory; ds-store: a directory holding .DS_Store; user-file: a directory holding notes.txt; beneath-a-file: the destination is typed as notes.txt/my-app, notes.txt being a file, so nothing can stand there.",
     "spelled": "How the destination is typed. name: my-app, from its parent; space: my app, from its parent; dot: ., from inside it (the destination must exist); absent: no directory at all.",
-    "within": "Where the destination's parent is. nothing: a directory no repository tracks; work-tree: inside the work tree of a repository with a commit and an origin of its own; template-checkout: inside the work tree of a repository whose origin is https://github.com/Pipelex/pipelex-method-apps.git.",
+    "within": "Where the destination's parent is. nothing: a directory no repository tracks; work-tree: inside the work tree of a repository with a commit and an origin of its own; template-checkout: inside the work tree of a repository whose origin is https://github.com/Pipelex/pipelex-method-apps.git; ignored-parent: under the tmp/ directory of a repository as in work-tree, whose committed .gitignore holds tmp/; ignored-by-name: at the root of a repository as in work-tree, whose committed .gitignore holds the directory-only pattern my-app/, which matches the destination only when it is read as a directory; re-included: under the apps/ directory of a repository as in work-tree, whose committed .gitignore holds apps/* and then !apps/my-app/, so that the destination itself is not ignored when it is read as a directory.",
     "args": "The arguments after the destination. {other-ecosystem} stands for a template the other ecosystem's initializer serves.",
     "method": "Whether --method mt_case is passed. Defaults to true.",
     "key": "Whether PIPELEX_API_KEY is set. Defaults to true.",
     "tools": "Which of make and git are on the PATH. Defaults to both.",
-    "git_identity": "Whether git has an identity to commit with. true: in its global configuration; false: none, and git refuses to guess one; under-parent: only through an includeIf \"gitdir:<the destination's parent>/\" section, git refusing to guess one elsewhere. Defaults to true.",
+    "git_identity": "Whether git has an identity to commit with. true: in its global configuration; false: none, and git refuses to guess one; under-parent: only through an includeIf \"gitdir:<the destination's parent>/\" section, git refusing to guess one elsewhere; enclosing-only: only in the enclosing repository's own .git/config, git refusing to guess one elsewhere. Defaults to true.",
     "make_exit": "The stub make's exit status. Defaults to 0.",
     "expect.verdict": "The verdict: the last line's first word, or its first two for refused: and failed:.",
     "expect.written": "Whether the template was written. When false, the destination holds exactly what it held before the run.",
-    "expect.git": "initialized: the destination is a repository on main with one commit, the pristine one; first-commit: the repository that was there has one commit, the pristine one; none: the destination holds no .git, and the enclosing repository's HEAD did not move; untouched: the repository that was there did not change.",
+    "expect.git": "initialized: the destination is a repository on main with one commit, the pristine one, and an enclosing repository's HEAD did not move and its git status --porcelain --untracked-files=all prints nothing; first-commit: the repository that was there has one commit, the pristine one; none: the destination holds no .git, and the enclosing repository's HEAD did not move; untouched: the repository that was there did not change.",
     "expect.make": "Whether make ran.",
     "expect.forwarded": "Arguments make's argument vector must contain."
   },
@@ -103,6 +103,49 @@
       "within": "work-tree",
       "git_identity": false,
       "expect": { "verdict": "created", "written": true, "git": "none", "make": true }
+    },
+    {
+      "name": "under a path the enclosing repository ignores, the project gets a repository of its own",
+      "destination": "missing",
+      "within": "ignored-parent",
+      "expect": { "verdict": "created", "written": true, "git": "initialized", "make": true }
+    },
+    {
+      "name": "an empty directory under an ignored path",
+      "destination": "empty",
+      "within": "ignored-parent",
+      "expect": { "verdict": "created", "written": true, "git": "initialized", "make": true }
+    },
+    {
+      "name": "a destination a directory-only pattern ignores is read as a directory before it exists",
+      "destination": "missing",
+      "within": "ignored-by-name",
+      "expect": { "verdict": "created", "written": true, "git": "initialized", "make": true }
+    },
+    {
+      "name": "an ignored destination spelled .",
+      "destination": "empty",
+      "within": "ignored-by-name",
+      "spelled": "dot",
+      "expect": { "verdict": "created", "written": true, "git": "initialized", "make": true }
+    },
+    {
+      "name": "a destination the enclosing repository re-includes is new files in that repository",
+      "destination": "missing",
+      "within": "re-included",
+      "expect": { "verdict": "created", "written": true, "git": "none", "make": true }
+    },
+    {
+      "name": "under an ignored path, an identity only the enclosing repository holds is not the new repository's",
+      "destination": "missing",
+      "within": "ignored-parent",
+      "git_identity": "enclosing-only",
+      "expect": {
+        "verdict": "refused: no-git-identity",
+        "written": false,
+        "git": "none",
+        "make": false
+      }
     },
     {
       "name": "a template's own checkout is refused",

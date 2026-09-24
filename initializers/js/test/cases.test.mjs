@@ -26,6 +26,19 @@ const TABLE = JSON.parse(fs.readFileSync(new URL("../../cases.json", import.meta
 /** A template the other ecosystem's initializer serves. */
 const OTHER_ECOSYSTEM = "cli-python";
 
+/**
+ * For each `within` inside an enclosing repository: what its committed
+ * `.gitignore` holds, and the directory under its root the destination's
+ * parent is.
+ */
+const ENCLOSING = {
+  "work-tree": { ignores: [], under: "" },
+  "template-checkout": { ignores: [], under: "" },
+  "ignored-parent": { ignores: ["tmp/"], under: "tmp" },
+  "ignored-by-name": { ignores: ["my-app/"], under: "" },
+  "re-included": { ignores: ["apps/*", "!apps/my-app/"], under: "apps" },
+};
+
 /** The destination's parent, inside what the case says. */
 function within(root, kind) {
   const env = setupEnv(root);
@@ -34,18 +47,24 @@ function within(root, kind) {
     fs.mkdirSync(parent);
     return { parent, repo: null };
   }
+  if (!Object.hasOwn(ENCLOSING, kind)) throw new Error(`cases.json: unknown within ${kind}`);
+  const { ignores, under } = ENCLOSING[kind];
   const repo = path.join(root, "theirs");
   fs.mkdirSync(repo);
   git(repo, ["init", "-q", "-b", "main"], env);
   fs.writeFileSync(path.join(repo, "README.md"), "theirs\n");
-  git(repo, ["add", "README.md"], env);
+  if (ignores.length > 0)
+    fs.writeFileSync(path.join(repo, ".gitignore"), `${ignores.join("\n")}\n`);
+  git(repo, ["add", "-A"], env);
   git(repo, ["commit", "-q", "-m", "Their first commit"], env);
   const origin =
     kind === "template-checkout"
       ? "https://github.com/Pipelex/pipelex-method-apps.git"
       : "https://github.com/someone/theirs.git";
   git(repo, ["remote", "add", "origin", origin], env);
-  return { parent: repo, repo };
+  const parent = path.join(repo, under);
+  fs.mkdirSync(parent, { recursive: true });
+  return { parent, repo };
 }
 
 /** Put what the case says at the destination. */
@@ -141,6 +160,12 @@ describe("initializers/cases.json", () => {
         makeExit: c.make_exit ?? 0,
       });
       if (identity === "under-parent") scopeIdentity(runsIn, parent);
+      if (identity === "enclosing-only") {
+        if (repo === null)
+          throw new Error("cases.json: enclosing-only needs an enclosing repository");
+        git(repo, ["config", "user.name", "Enclosing Runner"], env);
+        git(repo, ["config", "user.email", "enclosing@example.com"], env);
+      }
       const { code, output, verdict } = await runInitializer(argv, {
         cwd: c.spelled === "dot" ? dest : parent,
         env: runsIn,
@@ -181,6 +206,14 @@ describe("initializers/cases.json", () => {
             "",
             "the commit holds the whole copy",
           );
+          if (repo !== null) {
+            assert.equal(headOf(repo, env), enclosingHead, "the enclosing repository did not move");
+            assert.equal(
+              git(repo, ["status", "--porcelain", "--untracked-files=all"], env),
+              "",
+              "the enclosing repository sees nothing of the project",
+            );
+          }
           break;
         case "first-commit":
           assert.equal(git(dest, ["rev-list", "--count", "HEAD"], env), "1");
