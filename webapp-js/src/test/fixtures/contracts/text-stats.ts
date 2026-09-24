@@ -4,7 +4,8 @@
 // The `contracts.ts` that `npm run codegen` wrote for the `text-stats` method of
 // pipelex-starter-js (the gallery), recorded verbatim below this banner so the
 // shared code's tests run against real codegen output. The template ships no
-// method, so these stand in for one; see docs/chrome-lineage.md for the SHA.
+// method, so these stand in for one. Taken at the gallery's commit
+// 3bf44f0fbd3d967b8e50d171454da2278593ee95.
 // ---------------------------------------------------------------------------
 
 import type { InputForm, OutputForm, PipeIOContracts } from "@pipelex/mthds-form";

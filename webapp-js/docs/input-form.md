@@ -253,7 +253,11 @@ The resolver has two halves, because the kernel asks two questions. **Display** 
 
 **Neither half authorizes its caller, and a real deployment must.** The route streams, and the action mints a link that works outside the app, with the deployment's single API key and no session in between — right for a single-tenant app where the app is the only reader, wrong the moment two people use it, since either half will then serve one person's run output to another who holds the reference. `mayRead` in the route is where that check goes, and the action asks the same question before minting. Refusing to enumerate is not the same as refusing to serve: the `404` on a forbidden reference hides which objects exist, and this decides who may read one.
 
+<!-- template-only:begin -->
+
 `e2e/resultTile.spec.ts` is the live proof of the whole: it creates an app for an image-producing method, runs it, and checks that the picture's `src` is `/api/assets/…` and decoded, that the three header rules are on the response, and that the cost panel labels a partial cost as partial.
+
+<!-- template-only:end -->
 
 ## What is deliberately not built
 
