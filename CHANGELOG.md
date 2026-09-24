@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Removed
+
+- **The result view's own URL policy**: the web app template no longer runs a result through `scrubResultUrls` before the form kernel renders it, nor shows the note naming the file references that policy removed, because the kernel's own URL gate has refused what it was written to refuse since 0.9.0. A file URL the policy removed and the kernel accepts now renders: a cleartext `http:` URL, a GIF, AVIF or PDF `data:` URL, a `blob:` URL, or a same-origin path named in the payload, which is painted and linked but never framed. A file the kernel refuses is named by the kernel's own file card, and `docs/result-view.md` now tells a view of the method's own to judge a URL with the kernel's `viewableUrl`. A project made from an earlier template can delete its `src/lib/resultUrls.ts` the same way only once it runs `@pipelex/mthds-form` 0.9.0 or later: the 0.8 kernel frames a `data:text/html` document on the app's own origin.
+
 ## [v0.5.1] - 2026-09-24
 
 ### Changed
@@ -11,10 +17,6 @@
 
 - **A file input offers only the media types its upload action grants**: a document input used to accept a PNG or a JPEG that the method's upload action then refused. The scaffolded form now narrows each file input to the method's `ALLOWED_MIMES` through the kernel's `narrowFileFormats`, so the input's hint, its file picker and its own check name the list the action checks, and `make add-method` writes that list to `src/types/<camel>Uploads.ts`, which the action and the form both import.
 - **`make format-check` passes beside a gstack cache**: the web app template's `.prettierignore` lists `.gstack/`, which a global gitignore can hide from git but not from Prettier, so the tool's local cache no longer fails the check on an otherwise clean tree.
-
-### Removed
-
-- **The result view's own URL policy**: the web app template no longer runs a result through `scrubResultUrls` before the form kernel renders it, nor shows the note naming the file references that policy removed, because the kernel's own URL gate has refused what it was written to refuse since 0.9.0. A result carrying a cleartext `http:` image, or a GIF, AVIF or PDF `data:` URL, now renders, and a file the kernel refuses is named by the kernel's own file card. `docs/result-view.md` now tells a view of the method's own to judge a URL with the kernel's `viewableUrl`, and a project made from an earlier template can delete its `src/lib/resultUrls.ts` the same way.
 
 ## [v0.5.0] - 2026-09-24
 
