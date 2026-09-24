@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The web app template runs on `@pipelex/sdk` 0.22.0**: a blocking run's response is lifted onto the run's results by the SDK's own `resultsFromExecute`, the mapping it applies to a durable run, so a blocking result now carries the run's working memory as a durable one does and a narrower reads an intermediate stuff the same way in both modes.
+
 ### Fixed
 
 - **The release publishes with npm 11**: the release job installed the latest npm, whose 12.x changed the report `npm pack --json` prints and failed the initializer's package test before anything was published. It now installs npm 11, the npm the pull request checks also run, and the package test lists the packed tarball itself rather than reading npm's report.

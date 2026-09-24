@@ -1348,7 +1348,7 @@ export function renderActionTest(plan: ScaffoldPlan): string {
         ...(hasFiles
           ? ["    prepareInputs.mockResolvedValueOnce({ inputs: {}, uploads: [] });"]
           : []),
-        '    execute.mockResolvedValueOnce({ pipeline_run_id: "run-1", main_stuff: {} });',
+        '    execute.mockResolvedValueOnce({ pipeline_run_id: "run-1", main_stuff: {}, pipe_output: {} });',
         `    await run${names.pascal}Blocking({});`,
         "    expect(execute).toHaveBeenCalledWith({",
         methodField,

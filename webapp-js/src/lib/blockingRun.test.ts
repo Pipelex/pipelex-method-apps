@@ -39,12 +39,13 @@ describe("executeBlockingRun", () => {
     execute.mockResolvedValueOnce({
       pipeline_run_id: "run-1",
       main_stuff: { items: ["Ada"] },
+      pipe_output: { pipeline_run_id: "run-1", working_memory: { root: {}, aliases: {} } },
     });
 
     const result = await executeBlockingRun(async () => OPTIONS, parseFixture);
 
     expect(execute).toHaveBeenCalledWith(OPTIONS);
-    // No `pipe_output` on the response → the usage pair is absent → "unavailable".
+    // No usage pair on `pipe_output` → "unavailable".
     expect(result).toEqual({
       ok: true,
       output: { items: ["Ada"] },
@@ -60,7 +61,7 @@ describe("executeBlockingRun", () => {
 
   it("lifts tokens_usages off the execute response's pipe_output into the usage report", async () => {
     // On the blocking path the usage pair rides the extension-open `pipe_output`;
-    // the adapter lifts it onto RunResults so `buildUsageReport` reads it like durable.
+    // `resultsFromExecute` lifts it onto RunResults so `buildUsageReport` reads it like durable.
     execute.mockResolvedValueOnce({
       pipeline_run_id: "run-1",
       main_stuff: { items: ["Ada"] },

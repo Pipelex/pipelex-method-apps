@@ -9,12 +9,7 @@ import { buildUsageReport, type UsageReport } from "@/lib/usageReport";
 // method that lives on the platform or in a published package rather than
 // shipping its bundle inline. Every extension is optional, so an action that
 // sends `mthds_contents` satisfies this type unchanged.
-import type {
-  DictPipeOutput,
-  PipelexStartOptions,
-  RunResults,
-  TokensUsageRecord,
-} from "@pipelex/sdk";
+import { resultsFromExecute, type PipelexStartOptions, type RunResults } from "@pipelex/sdk";
 
 export type BlockingOutcome<T> =
   | { ok: true; output: T; usage: UsageReport }
@@ -29,18 +24,15 @@ export type BlockingOutcome<T> =
  * `PipelineExecuteTimeoutError`; that (and every other SDK error) is caught and
  * classified, so the caller always gets a structured `BlockingOutcome`.
  *
- * The execute response already carries the resolved main output on `.main_stuff`
- * (the SDK digs it out of the working memory), so it adapts onto `RunResults`
- * with the SAME resolved `main_stuff` the durable path delivers — one narrower,
- * one accessor, no `pipe_output` search. A completed run that named no locatable
- * main stuff throws `MissingMainStuffError` on that access, which the catch below
- * classifies like any other SDK error.
- *
- * Usage rides differently on the two paths: the durable path gets `tokens_usages`
- * directly on `RunResults`, but the blocking execute response carries it on the
- * extension-open `pipe_output`. So the adapter also lifts the usage pair off
- * `pipe_output` onto the `RunResults` it builds, and `buildUsageReport` reads it
- * the same way for both modes.
+ * The execute response is lifted onto `RunResults` by the SDK's own
+ * `resultsFromExecute`, the mapping its durable fallback applies: the resolved
+ * `main_stuff` (the SDK digs it out of the working memory), the working memory
+ * itself, and the usage pair the runner carries on the extension-open
+ * `pipe_output`. So a narrower, `buildUsageReport` and anything reading an
+ * intermediate stuff read the blocking result exactly as they read the durable
+ * one — one accessor each, no `pipe_output` search. A completed run that named no
+ * locatable main stuff throws `MissingMainStuffError` on that lift, which the catch
+ * below classifies like any other SDK error.
  */
 export async function executeBlockingRun<T>(
   buildOptions: () => Promise<PipelexStartOptions>,
@@ -49,16 +41,8 @@ export async function executeBlockingRun<T>(
   try {
     const options = await buildOptions();
     const response = await getPipelexClient().execute(options);
-    // `pipe_output` is typed as always-present, but a test double
-    // may omit it — read it as optional when lifting the usage pair.
-    const pipeOutput = response.pipe_output as DictPipeOutput | undefined;
-    const adapted: RunResults = {
-      pipeline_run_id: response.pipeline_run_id,
-      main_stuff: response.main_stuff,
-      tokens_usages: (pipeOutput?.tokens_usages ?? null) as TokensUsageRecord[] | null,
-      usage_assembly_error: (pipeOutput?.usage_assembly_error ?? null) as string | null,
-    };
-    return { ok: true, output: parse(adapted), usage: buildUsageReport(adapted) };
+    const results = resultsFromExecute(response);
+    return { ok: true, output: parse(results), usage: buildUsageReport(results) };
   } catch (err) {
     // `blocking: true` maps the gateway's 502/504 cap response to execute_timeout.
     return { ok: false, error: classifyPipelineError(err, readClassifyEnv(), { blocking: true }) };
