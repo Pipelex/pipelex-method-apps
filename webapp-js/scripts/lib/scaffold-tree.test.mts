@@ -68,6 +68,7 @@ const SLICES = [
     argv: ["scripts/lib/fixtures/bundles/receipt-review", "--name", "fixture-receipt-review"],
     slug: "fixture-receipt-review",
     pascal: "FixtureReceiptReview",
+    uploads: true,
   },
 ];
 
@@ -145,6 +146,9 @@ describe("a scaffolded slice, in a copy of this tree", () => {
       `src/actions/run${slice.pascal}Pipeline.test.ts`,
       `src/components/${slice.pascal}Form.tsx`,
       `src/types/${slice.pascal.charAt(0).toLowerCase()}${slice.pascal.slice(1)}Pipeline.ts`,
+      ...(slice.uploads
+        ? [`src/types/${slice.pascal.charAt(0).toLowerCase()}${slice.pascal.slice(1)}Uploads.ts`]
+        : []),
       "src/methods.ts",
     ]);
     const results = await new ESLint({ cwd: tree }).lintFiles(files);
