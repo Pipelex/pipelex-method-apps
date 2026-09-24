@@ -2,8 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A guide to writing a result view of the method's own**: the web app template's `docs/result-view.md` says where a bespoke view goes, why it takes the typed output rather than the payload, how to label enum values, format numbers and render Markdown, and how files keep the app's URL policy. The form `make add-method` writes points at it.
+
 ### Changed
 
+- **The execution mode is the deployment's, and the page no longer offers it (Breaking)**: the web app template's Blocking and Durable switch is gone from every method's form, and `ModeToggle` with it. A person using the app had no reason to know the difference, and one who picked Blocking saw any method running past the hosted gateway's ~30-second cap fail. The mode is `NEXT_PUBLIC_EXECUTION_MODE`, read as `EXECUTION_MODE` from `src/config.ts` (renamed from `DEFAULT_EXECUTION_MODE`), still Durable by default; set it to `blocking` for a deployment that does not serve the durable run lifecycle. A project made from an earlier template keeps its switch until it removes it.
+- **No development badge**: the web app template sets `devIndicators: false`, so `next dev` no longer draws its badge on the page a developer shows people. Compile and runtime errors still surface.
 - **A finished run keeps its id**: once a run of the web app template has finished, its id stays under the result, selectable in a click and with a Copy button, in Durable mode and now in Blocking mode too, where no id was ever shown. The server logs a blocking run's id when it finishes, as it logs a durable run's when it starts. The token-and-cost table moves under it, into a "Usage and cost" disclosure that starts closed, since it names models and pipes a person using the app has no use for. `useRun`'s `done` state carries the `runId`, and so does a blocking outcome.
 - **The web app template runs on `@pipelex/sdk` 0.22.0**: a blocking run's response is lifted onto the run's results by the SDK's own `resultsFromExecute`, the mapping it applies to a durable run, so a blocking result now carries the run's working memory as a durable one does and a narrower reads an intermediate stuff the same way in both modes.
 

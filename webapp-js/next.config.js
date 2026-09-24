@@ -9,6 +9,10 @@ const nextConfig = {
       bodySizeLimit: "12mb",
     },
   },
+  // The floating badge `next dev` draws on every page. The app is what its
+  // developer shows people, and the badge is chrome of Next's, not of the app.
+  // Next still surfaces compile and runtime errors with it off.
+  devIndicators: false,
   // `next dev` logs every Server Function call with its arguments, and a file
   // input reaches its Server Action as a base64 `data:` URL — so every document
   // a user drops into the form (a CV, a contract, an invoice) was printed whole
