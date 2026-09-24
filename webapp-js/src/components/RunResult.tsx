@@ -49,6 +49,9 @@ interface RunResultProps {
  * `viewableUrl`, frames a document only over `http(s):` or a path this app's
  * resolver produced, and renders an image in a text result's Markdown as a link
  * instead of loading it. `ResultEnv.test.tsx` pins that at this composition.
+ * An HTML result's markup is the exception: it is framed under a content policy
+ * that admits `https:` images, so a remote image in it loads on paint
+ * (`docs/input-form.md` says what a project can do about that).
  *
  * **A stored file paints through this app's own assets route.** A run's file
  * comes back as a `pipelex-storage://` reference, which resolves nowhere in a

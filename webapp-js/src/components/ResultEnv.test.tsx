@@ -87,7 +87,10 @@ describe("ResultEnv", () => {
 
 // A run's output is model-shaped data crossing a trust boundary, and the result
 // view hands it to the kernel untouched: the kernel's `viewableUrl` gate is the
-// only thing between a payload and the browser's sinks. These cases pin that at
+// only thing between a payload's file URLs and the elements the kernel renders.
+// (An HTML result's markup is outside it: the kernel frames that markup under a
+// content policy admitting `https:` images, and no case here can see inside the
+// frame — see `docs/input-form.md`.) These cases pin the gate at
 // the host's own composition — `<RunResult>` under `<ResultEnv>`, as the root
 // layout mounts it — so a kernel release that loosens the gate, a resolver that
 // launders a payload path, or a `proseImages="load"` added to the provider fails
