@@ -49,6 +49,7 @@ describe("executeBlockingRun", () => {
     expect(result).toEqual({
       ok: true,
       output: { items: ["Ada"] },
+      runId: "run-1",
       usage: {
         state: "unavailable",
         calls: [],

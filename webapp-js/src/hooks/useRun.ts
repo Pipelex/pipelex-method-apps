@@ -26,8 +26,10 @@ export type RunHealth = "reconnecting" | "retrying";
  * coarse run status (null in blocking — there is no per-tick status),
  * `elapsedMs` is a smooth wall-clock counter, `health` is null while polling
  * cleanly or names why we're in a resilient/retrying state, and `runId` is the
- * durable run's id once it has one. The id rides the error state too: the run a
- * user saw fail is the run they need to look up.
+ * durable run's id once it has one. The id rides both terminal states too: the
+ * run a user saw finish is the run they quote, and the run they saw fail is the
+ * run they need to look up — and once the page is closed, a run started from an
+ * inline bundle has no other handle.
  */
 export type RunState<T> =
   | { phase: "idle" }
@@ -44,7 +46,13 @@ export type RunState<T> =
        */
       runId: string | null;
     }
-  | { phase: "done"; output: T; usage: UsageReport }
+  | {
+      phase: "done";
+      output: T;
+      usage: UsageReport;
+      /** The finished run's id — in blocking mode too, where it arrives with the result. */
+      runId: string;
+    }
   | {
       phase: "error";
       error: PipelineError;
@@ -164,16 +172,16 @@ export function useRun<TInput, TOutput>(
         clearTimers();
         setState({ phase: "error", error, runId });
       };
-      const succeed = (output: TOutput, usage: UsageReport) => {
+      const succeed = (output: TOutput, usage: UsageReport, finishedRunId: string) => {
         if (!isCurrent()) return;
         clearTimers();
-        setState({ phase: "done", output, usage });
+        setState({ phase: "done", output, usage, runId: finishedRunId });
       };
 
       if (mode === "blocking") {
         blocking(input)
           .then((outcome) => {
-            if (outcome.ok) succeed(outcome.output, outcome.usage);
+            if (outcome.ok) succeed(outcome.output, outcome.usage, outcome.runId);
             else fail(outcome.error);
           })
           .catch((err) => fail(classifyTransportError(err)));
@@ -239,7 +247,7 @@ export function useRun<TInput, TOutput>(
 
         transientFailures = 0; // a verdict-bearing tick clears the streak
         if (outcome.state === "completed") {
-          succeed(outcome.output, outcome.usage);
+          succeed(outcome.output, outcome.usage, runId);
           return;
         }
 

@@ -50,7 +50,7 @@ describe("useRun — blocking", () => {
   it("run → running → done", async () => {
     const blocking = vi
       .fn()
-      .mockResolvedValueOnce({ ok: true, output: { value: "x" }, usage: USAGE });
+      .mockResolvedValueOnce({ ok: true, output: { value: "x" }, usage: USAGE, runId: "run-b" });
     const cfg = makeCfg({ mode: "blocking", blocking });
     const { result } = renderHook(() => useRun(cfg));
 
@@ -58,8 +58,13 @@ describe("useRun — blocking", () => {
     expect(result.current.state.phase).toBe("running");
 
     await flush();
-    // The outcome's usage rides through into the done state.
-    expect(result.current.state).toEqual({ phase: "done", output: { value: "x" }, usage: USAGE });
+    // The outcome's usage and run id ride through into the done state.
+    expect(result.current.state).toEqual({
+      phase: "done",
+      output: { value: "x" },
+      usage: USAGE,
+      runId: "run-b",
+    });
     expect(blocking).toHaveBeenCalledWith("in");
   });
 
@@ -116,10 +121,12 @@ describe("useRun — durable", () => {
     expect(asRunning(result.current.state).status).toBe("RUNNING");
 
     await flush(2000); // scheduled second poll fires → completed
+    // The id `start` returned stays on the finished run.
     expect(result.current.state).toEqual({
       phase: "done",
       output: { value: "done" },
       usage: USAGE,
+      runId: "run-1",
     });
     expect(start).toHaveBeenCalledWith("in");
   });
@@ -158,7 +165,11 @@ describe("useRun — durable", () => {
     expect(asRunning(result.current.state).health).toBe("retrying");
 
     await flush(1000); // scheduled retry → completed
-    expect(result.current.state).toEqual({ phase: "done", output: { value: "done" } });
+    expect(result.current.state).toEqual({
+      phase: "done",
+      output: { value: "done" },
+      runId: "run-1",
+    });
     expect(poll).toHaveBeenCalledTimes(2);
   });
 
@@ -223,7 +234,11 @@ describe("useRun — durable", () => {
     expect(result.current.state.phase).toBe("running");
 
     await flush(1000); // retry → completed
-    expect(result.current.state).toEqual({ phase: "done", output: { value: "recovered" } });
+    expect(result.current.state).toEqual({
+      phase: "done",
+      output: { value: "recovered" },
+      runId: "run-1",
+    });
   });
 
   it("gives up after a sustained streak of transient poll failures", async () => {

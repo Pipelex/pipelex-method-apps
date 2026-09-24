@@ -12,7 +12,7 @@ import { buildUsageReport, type UsageReport } from "@/lib/usageReport";
 import { resultsFromExecute, type PipelexStartOptions, type RunResults } from "@pipelex/sdk";
 
 export type BlockingOutcome<T> =
-  | { ok: true; output: T; usage: UsageReport }
+  | { ok: true; output: T; usage: UsageReport; runId: string }
   | { ok: false; error: PipelineError };
 
 /**
@@ -42,7 +42,19 @@ export async function executeBlockingRun<T>(
     const options = await buildOptions();
     const response = await getPipelexClient().execute(options);
     const results = resultsFromExecute(response);
-    return { ok: true, output: parse(results), usage: buildUsageReport(results) };
+    // The durable path logs a run's id when it starts; a blocking run has no id
+    // until it has finished, so it is logged here, and every run this app makes
+    // is in the server's log whichever mode made it. It is not a diagnostic: it
+    // is the handle a user quotes, and the one a run is looked up by once the
+    // page is closed (see `durableRun.ts`).
+    // eslint-disable-next-line no-console
+    console.info(`[pipelex] run finished: ${response.pipeline_run_id}`);
+    return {
+      ok: true,
+      output: parse(results),
+      usage: buildUsageReport(results),
+      runId: response.pipeline_run_id,
+    };
   } catch (err) {
     // `blocking: true` maps the gateway's 502/504 cap response to execute_timeout.
     return { ok: false, error: classifyPipelineError(err, readClassifyEnv(), { blocking: true }) };
