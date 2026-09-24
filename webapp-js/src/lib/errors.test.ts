@@ -559,12 +559,16 @@ describe("classifyUploadError — a file's upload, in the browser", () => {
     expect(result.details).toContain(`code: ${code ?? "(none)"}`);
   });
 
-  it("keeps the status storage answered with", () => {
+  it("keeps the status storage answered with, and claims no outcome the SDK calls unknown", () => {
     const err = new UploadTransportError("storage answered 503", {
       status: 503,
       code: "server_error",
     });
-    expect(classifyUploadError(err).details).toContain("status: 503");
+    const result = classifyUploadError(err);
+    expect(result.details).toContain("status: 503");
+    // Storage may have written the object before it failed, so the SDK cannot
+    // say whether the file was stored, and neither can the message.
+    expect(result.message).not.toMatch(/not stored|could not be stored/);
   });
 
   it("treats anything else as the grant request failing to reach this app", () => {

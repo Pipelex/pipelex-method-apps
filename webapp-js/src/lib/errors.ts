@@ -626,7 +626,7 @@ function classifyUploadTransport(err: UploadTransportError): PipelineError {
         kind: "upload_failed",
         title: "Pipelex storage could not store the file",
         message:
-          "Pipelex storage answered with a server error, so the file was not stored. This is usually temporary.",
+          "Pipelex storage answered with a server error, so the upload may not have completed. This is usually temporary.",
         hint: { summary: "Drop the file again in a moment." },
         details,
       };
@@ -638,7 +638,7 @@ function classifyUploadTransport(err: UploadTransportError): PipelineError {
         kind: "upload_failed",
         title: "Uploading the file failed",
         message:
-          "The file could not be stored in Pipelex storage. The technical details below should help track it down.",
+          "The upload to Pipelex storage failed. The technical details below should help track it down.",
         details,
       };
   }
