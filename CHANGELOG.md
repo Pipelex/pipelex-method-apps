@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **The web app template runs on `@pipelex/sdk` 0.25.1**: the SDK no longer offers the Pipelex Gateway key calls (`createGatewayApiKey`, `getGatewayApiKey`), which neither the template nor any action the scaffold writes ever made, so nothing changes for a project. The app keeps calling the hosted API with a Pipelex API key, which this release leaves untouched.
+
 ### Fixed
 
 - **`create-method-app` at a path another repository ignores**: a destination inside another repository's work tree that the repository ignores, such as a `tmp/` its `.gitignore` lists or anywhere under a home directory kept as a repository that ignores `*`, now gets a repository of its own on `main` with the pristine commit, and the `git:` line names the repository that ignores it. The initializer used to report such a project as new files in the enclosing repository and make no repository, which left it under no version control at all; a project made that way earlier can be given one with `git init` and a first commit. A directory the repository does not ignore still gets no repository even when every file in it is ignored, as under `*` followed by `!*/`, and the `git:` line now says the project is under no version control instead of calling it new files of that repository. A destination that is a symlink is judged by the repository its target is in, not the one the link sits in.
