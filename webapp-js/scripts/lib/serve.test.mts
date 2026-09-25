@@ -773,6 +773,47 @@ describe.skipIf(!CAN_SERVE)("make stop", SPAWNS, () => {
   });
 
   it.skipIf(!READS_PS)(
+    "clears the record of a server that has ended, even where ps cannot run",
+    async () => {
+      const checkout = checkoutWith();
+      const config = configFor(checkout, "ok", await freePorts(1));
+      const started = await run(serve, config);
+      expect(started.code, started.lines.join("\n")).toBe(0);
+      const recorded = stateOf(checkout)!;
+      const pids = pidsIn(checkout);
+      for (const pid of pids) kill(pid, "SIGKILL");
+      expect(await allGone(pids)).toBe(true);
+
+      const result = await run(stop, { ...config, ps: psThatCannotRun() });
+      expect(result.code).toBe(0);
+      expect(result.verdict).toBe(
+        `not-running — the server make serve started (process group ${recorded.pgid}) has ` +
+          "already exited.",
+      );
+      expect(stateOf(checkout)).toBeUndefined();
+    },
+  );
+
+  it.skipIf(!READS_PS)(
+    "stops a server whose first process has ended without reading a start time",
+    async () => {
+      const checkout = checkoutWith();
+      const config = configFor(checkout, "ok", await freePorts(1));
+      const started = await run(serve, config);
+      expect(started.code, started.lines.join("\n")).toBe(0);
+      const [parent, child] = pidsIn(checkout);
+      kill(parent, "SIGKILL");
+      expect(await allGone([parent])).toBe(true);
+      expect(alive(child)).toBe(true);
+
+      const result = await run(stop, { ...config, ps: psThatCannotRun() });
+      expect(result.verdict).toMatch(/^stopped /);
+      expect(await allGone([child])).toBe(true);
+      expect(stateOf(checkout)).toBeUndefined();
+    },
+  );
+
+  it.skipIf(!READS_PS)(
     "never takes a start time it cannot read for another process's",
     async () => {
       const checkout = checkoutWith();

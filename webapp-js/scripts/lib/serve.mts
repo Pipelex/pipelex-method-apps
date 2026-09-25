@@ -415,12 +415,14 @@ function startTimeReader(config: ServeConfig): string {
 
 /**
  * When a recorded group's first process started, or `undefined` once it no
- * longer runs. One that still runs and whose start time cannot be read throws
- * `NoPsError` rather than answering: read as another process's, its record
- * would be dropped while the server may still listen, and read as serve's, a
- * process given the same id later could be signalled.
+ * longer runs, which needs no start time read, so no `ps`. One that still runs
+ * and whose start time cannot be read throws `NoPsError` rather than
+ * answering: read as another process's, its record would be dropped while the
+ * server may still listen, and read as serve's, a process given the same id
+ * later could be signalled.
  */
 function leaderStartOf(pid: number, ps: string): string | undefined {
+  if (!processAlive(pid)) return undefined;
   const start = startTimeOf(pid, ps);
   if (start === undefined && processAlive(pid)) throw new NoPsError(pid);
   return start;
@@ -1210,7 +1212,9 @@ async function stopChecked(config: ServeConfig, checkout: string): Promise<numbe
     return EXIT_OK;
   }
   requireLsof(config.lsof);
-  requirePs(config.ps);
+  // Unlike serve, stop does not require ps up front: the record of a group that
+  // has ended is cleared without a start time, and ownership throws NoPsError
+  // for one that still runs and whose start cannot be read.
   const owner = ownership(config, state, checkout);
   if (owner === "gone") {
     removeState(checkout);

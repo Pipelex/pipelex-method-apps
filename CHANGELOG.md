@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- **`make serve` and `make stop` where `ps` may not run**: in a sandbox that refuses `ps`, as Codex's `workspace-write` sandbox does on macOS, the web app template's `make serve` now refuses with `refused: no-ps` before starting anything, where it used to start the server, stop it again and report `failed: exited` as if it had exited at once. `make stop` refuses the same way and keeps `.serve/state.json`, where it used to take the server for another process, drop its record and report `not-running` while it still listened, so that no later `make stop` could find it. A server whose signals the system refuses is reported as `failed: still-running` with its record kept, never as `stopped`. The template's own tests skip the cases that start a server where `ps` may not run, so `make all` passes there.
+- **`make serve` and `make stop` where `ps` may not run**: in a sandbox that refuses `ps`, as Codex's `workspace-write` sandbox does on macOS, the web app template's `make serve` now refuses with `refused: no-ps` before starting anything, where it used to start the server, stop it again and report `failed: exited` as if it had exited at once. `make stop` refuses the same way while the recorded server still runs and keeps `.serve/state.json`, where it used to take the server for another process, drop its record and report `not-running` while it still listened, so that no later `make stop` could find it; the record of a server that has ended is still cleared there. A server whose signals the system refuses is reported as `failed: still-running` with its record kept, never as `stopped`. The template's own tests skip the cases that start a server where `ps` may not run, so `make all` passes there.
 
 ## [v0.5.4] - 2026-09-25
 
