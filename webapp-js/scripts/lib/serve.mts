@@ -12,10 +12,14 @@
  *
  *   serving, already-serving                     the page answered
  *   refused: not-loopback, refused: port-held,   nothing was started
- *   refused: no-lsof, refused: bad-port,
- *   refused: busy
+ *   refused: no-lsof, refused: no-ps,
+ *   refused: bad-port, refused: busy
  *   failed: not-listening, failed: exited,       what was started is stopped
- *   failed: page <status>, failed: interrupted
+ *   failed: page <status>, failed: no-ps,
+ *   failed: interrupted
+ *   failed: still-running                        a server of serve's that it
+ *                                                meant to stop still runs, and
+ *                                                stays recorded if it was
  *   stopped, not-running                         make stop
  *
  * These rules make the verdict true rather than hopeful:
@@ -38,7 +42,14 @@
  *    the one serve started only while that first process, if it still runs,
  *    started when the record says, and one of the group's processes runs in
  *    this checkout: a stale record whose id now names a shell, an editor or the
- *    very `make` running the command is never signalled.
+ *    very `make` running the command is never signalled. A start time that
+ *    cannot be read proves neither way, and nor does a running group none of
+ *    whose processes `lsof` can see, so the record is kept and nothing is
+ *    signalled.
+ *  - **A record goes only with its server.** It is removed once its group has
+ *    ended or is proven another's, never on a stop the system refused, as a
+ *    sandbox refuses to signal a process started outside it: the record is how
+ *    a later `make stop` finds the server.
  *  - **One run at a time.** A serve or a stop holds `.serve/lock` from its first
  *    look at the state to its verdict, so two never undo each other. One that
  *    finds it held waits, and a second `make serve` then reports the server the
@@ -49,7 +60,9 @@
  *    the checkout's real path, in the letter case the disk has.
  *  - **Nothing unproven is left running.** A server whose port does not open in
  *    time, that exits, whose page does not answer `200`, or whose start is
- *    interrupted or broken by an error, is stopped with every process under it.
+ *    interrupted or broken by an error, is stopped with every process under it,
+ *    and one the system will not let serve stop is reported as still running,
+ *    never as stopped.
  *
  * Serve never stops what it did not start: a server a person started from this
  * checkout is reported and left alone, and a port another directory holds is
@@ -57,6 +70,10 @@
  *
  * It needs `lsof`, and refuses without it rather than passing silently as
  * `port-check` does, since a proof that cannot check the listener is not one.
+ * It needs a process's start time too, read from `/proc` on Linux and with
+ * `ps` elsewhere, and refuses before anything starts when it cannot read its
+ * own, as in a sandbox that will not run `ps`: the server it started could not
+ * be told from a process given the same id later, so it could not be stopped.
  * An `lsof` or `ps` killed by a signal has not answered either: the terminal's
  * Ctrl-C or hangup reaches them as it reaches serve, and their silence read as
  * "nothing runs" would take a running server for gone and drop its record. So
@@ -120,6 +137,8 @@ export interface ServeConfig {
   graceMs: number;
   /** The `lsof` to run; a test names one that does not exist. */
   lsof: string;
+  /** The `ps` that reads a start time where `/proc` does not; a test names one that cannot run. */
+  ps: string;
   print: (line: string) => void;
 }
 
@@ -132,6 +151,7 @@ export const DEFAULT_CONFIG: ServeConfig = {
   pageMs: 120_000,
   graceMs: 5_000,
   lsof: "lsof",
+  ps: "ps",
   print: (line) => console.log(line),
 };
 
@@ -147,7 +167,31 @@ export interface ServeState {
   startedAt: string;
 }
 
-class NoLsofError extends Error {}
+/**
+ * An lsof serve cannot read: missing, or not taking lsof's options, or, with
+ * `pgid`, one that sees none of a recorded group's processes while the group
+ * still runs.
+ */
+class NoLsofError extends Error {
+  readonly pgid?: number;
+  constructor(pgid?: number) {
+    super(pgid === undefined ? "no usable lsof" : `lsof sees no process of group ${pgid}`);
+    this.pgid = pgid;
+  }
+}
+
+/**
+ * A start time serve needs and cannot read: its own process's, when `ps` cannot
+ * run here at all, or, with `pid`, that of a recorded group's first process,
+ * which still runs.
+ */
+class NoPsError extends Error {
+  readonly pid?: number;
+  constructor(pid?: number) {
+    super(pid === undefined ? "no start time" : `no start time for pid ${pid}`);
+    this.pid = pid;
+  }
+}
 
 /** An `lsof` or `ps` serve ran was killed by a signal, so it gave no answer. */
 class HelperKilledError extends Error {
@@ -328,9 +372,11 @@ function groupAlive(pgid: number): boolean {
  * `/proc`, in clock ticks since the boot, so the boot's id goes with it, and
  * this needs no `ps`, which a slim image may lack; elsewhere `ps` reads it, in
  * a locale and a time zone fixed so that two shells agree on its spelling: it
- * prints local time, and an agent's shell often sets `TZ=UTC`.
+ * prints local time, and an agent's shell often sets `TZ=UTC`. A `ps` that
+ * cannot run at all throws `NoPsError`, as when a sandbox refuses it: Codex's,
+ * on macOS, will not run a setuid program, and `ps` is one.
  */
-export function startTimeOf(pid: number): string | undefined {
+export function startTimeOf(pid: number, ps = "ps"): string | undefined {
   if (process.platform === "linux") {
     let stat: string;
     try {
@@ -349,33 +395,107 @@ export function startTimeOf(pid: number): string | undefined {
     }
     return `${boot}:${fields[19]}`;
   }
-  const result = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], {
+  const result = spawnSync(ps, ["-o", "lstart=", "-p", String(pid)], {
     encoding: "utf-8",
     env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
   });
+  if (result.error !== undefined) throw new NoPsError();
   if (result.signal !== null) throw new HelperKilledError("ps", result.signal);
   const text = result.status === 0 ? result.stdout.trim() : "";
   return text === "" ? undefined : text;
 }
 
-function signalGroup(pgid: number, signal: NodeJS.Signals): void {
+/**
+ * Whether serve can read a start time here: its own process's, which runs, so
+ * no answer means none can be read. A sandbox that will not run `ps` fails it.
+ */
+export function psUsable(ps: string): boolean {
   try {
-    process.kill(-pgid, signal);
-  } catch {
-    // The group is already gone.
+    return startTimeOf(process.pid, ps) !== undefined;
+  } catch (error) {
+    if (error instanceof NoPsError) return false;
+    throw error;
   }
 }
 
-/** Stop a whole group: a polite signal, then a hard one once the grace period runs out. */
-export async function stopGroup(pgid: number, graceMs: number): Promise<void> {
-  signalGroup(pgid, "SIGTERM");
+function requirePs(ps: string): void {
+  if (!psUsable(ps)) throw new NoPsError();
+}
+
+/** How a start time is read here, for a verdict to say. */
+function startTimeReader(config: ServeConfig): string {
+  return process.platform === "linux" ? "from /proc" : `with ${config.ps}`;
+}
+
+/**
+ * When a recorded group's first process started, or `undefined` once it no
+ * longer runs, which needs no start time read, so no `ps`. One that still runs
+ * and whose start time cannot be read throws `NoPsError` rather than
+ * answering: read as another process's, its record would be dropped while the
+ * server may still listen, and read as serve's, a process given the same id
+ * later could be signalled.
+ */
+function leaderStartOf(pid: number, ps: string): string | undefined {
+  if (!processAlive(pid)) return undefined;
+  const start = startTimeOf(pid, ps);
+  if (start === undefined && processAlive(pid)) throw new NoPsError(pid);
+  return start;
+}
+
+/**
+ * Signal a whole group, and say whether the signal reached it: a group already
+ * gone needs none, and `EPERM` means the system refused it, as a sandbox
+ * refuses a signal to a process started outside it.
+ */
+function signalGroup(pgid: number, signal: NodeJS.Signals): boolean {
+  try {
+    process.kill(-pgid, signal);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "EPERM";
+  }
+}
+
+/** How stopping a group ended: it has, the system refused the signal, or it outlived the hard one. */
+export type StopOutcome = "stopped" | "refused" | "survived";
+
+/**
+ * Stop a whole group: a polite signal, then a hard one once the grace period
+ * runs out. A refused signal ends the attempt at once, since waiting would not
+ * change the answer.
+ */
+export async function stopGroup(pgid: number, graceMs: number): Promise<StopOutcome> {
+  if (!signalGroup(pgid, "SIGTERM")) return groupAlive(pgid) ? "refused" : "stopped";
   const deadline = Date.now() + graceMs;
   while (groupAlive(pgid) && Date.now() < deadline) await sleep(100);
   if (groupAlive(pgid)) {
-    signalGroup(pgid, "SIGKILL");
+    if (!signalGroup(pgid, "SIGKILL")) return groupAlive(pgid) ? "refused" : "stopped";
     const hardDeadline = Date.now() + 2_000;
     while (groupAlive(pgid) && Date.now() < hardDeadline) await sleep(50);
   }
+  return groupAlive(pgid) ? "survived" : "stopped";
+}
+
+/**
+ * The verdict for a group serve or stop meant to stop and could not, `why`
+ * saying why it was stopping it. Its record is kept, so a later make stop still
+ * finds it; one a failed start never recorded is named for a person to stop.
+ */
+function stillRunning(pgid: number, why: string, outcome: StopOutcome, recorded = true): string {
+  const cause =
+    outcome === "refused"
+      ? "the system refused to signal it, as a sandbox refuses a signal to a process started " +
+        "outside it"
+      : "it outlived SIGKILL";
+  const then = recorded
+    ? `It is still running and still recorded in ${STATE_FILE}, so make stop run where it may ` +
+      "signal the group stops it."
+    : "It is still running and was never recorded, so make stop cannot find it: stop it with " +
+      `kill -- -${pgid} where that is allowed.`;
+  return (
+    `failed: still-running — the server make serve started (process group ${pgid}) ${why}, ` +
+    `and could not be stopped: ${cause}. ${then}`
+  );
 }
 
 // ── The state file ──────────────────────────────────────────────────────────
@@ -405,17 +525,41 @@ function removeState(checkout: string): void {
  * Whether the group a state file names is still serve's server in this
  * checkout: `gone` when no process of it runs, `foreign` when its id now names
  * another group, or when its processes run elsewhere, as in a checkout copied
- * with its `.serve/`.
+ * with its `.serve/`. A first process whose start time cannot be read is
+ * neither, and throws `NoPsError`; a running group none of whose processes
+ * lsof can see is neither too, and throws `NoLsofError`.
  */
-function ownership(lsof: string, state: ServeState, checkout: string): "ours" | "gone" | "foreign" {
+function ownership(
+  config: ServeConfig,
+  state: ServeState,
+  checkout: string,
+): "ours" | "gone" | "foreign" {
   if (!groupAlive(state.pgid)) return "gone";
   // A group's id is its first process's. While that process runs it must be
   // the one serve started; once it has ended, the id is not given to another
   // process until the whole group has ended too, so the group is still serve's.
-  if (processAlive(state.pgid) && startTimeOf(state.pgid) !== state.leaderStart) return "foreign";
-  const cwds = groupCwds(lsof, state.pgid);
-  if (cwds.length === 0) return "gone";
-  return cwds.includes(checkout) ? "ours" : "foreign";
+  const leaderStart = leaderStartOf(state.pgid, config.ps);
+  if (leaderStart !== undefined && leaderStart !== state.leaderStart) return "foreign";
+  const cwds = groupCwds(config.lsof, state.pgid);
+  if (cwds.length > 0) return cwds.includes(checkout) ? "ours" : "foreign";
+  // Nothing seen: the group has ended since, or lsof may not look at its
+  // processes, which proves neither way.
+  if (!groupAlive(state.pgid)) return "gone";
+  throw new NoLsofError(state.pgid);
+}
+
+/**
+ * The `refused: no-lsof` verdict for a recorded group that still runs where
+ * lsof sees none of its processes.
+ */
+function unseenGroup(config: ServeConfig, pgid: number): string {
+  return (
+    `refused: no-lsof — process group ${pgid}, recorded in ${STATE_FILE}, still runs, but ` +
+    `${config.lsof} sees none of its processes, so whether it is the server make serve started ` +
+    "here cannot be told. Nothing was signalled or started, and the record was kept: run make " +
+    `stop where lsof can see it, or remove ${STATE_FILE} if that group is not this checkout's ` +
+    "server."
+  );
 }
 
 // ── The page ────────────────────────────────────────────────────────────────
@@ -688,14 +832,52 @@ export async function serve(config: ServeConfig): Promise<number> {
   } catch (error) {
     if (error instanceof NoLsofError) {
       print(
-        `refused: no-lsof — make serve reads who holds the port with lsof, and ${config.lsof} ` +
-          "is not on the PATH or does not take lsof's options, as BusyBox's does not. Install " +
-          "lsof, or run make dev in the foreground.",
+        error.pgid !== undefined
+          ? unseenGroup(config, error.pgid)
+          : `refused: no-lsof — make serve reads who holds the port with lsof, and ${config.lsof} ` +
+              "is not on the PATH or does not take lsof's options, as BusyBox's does not. " +
+              "Install lsof, or run make dev in the foreground.",
+      );
+      return EXIT_FAILED;
+    }
+    if (error instanceof NoPsError) {
+      print(
+        refusedNoPs(
+          config,
+          error,
+          "make serve reads when the server's first process started, to tell it later from a " +
+            "process given the same id",
+          "Nothing was started: run make serve where it can, or make dev in the foreground.",
+        ),
       );
       return EXIT_FAILED;
     }
     throw error;
   }
+}
+
+/**
+ * The `refused: no-ps` verdict. Without a pid, serve's own start time could not
+ * be read, and `need` says what serve or stop reads it for; with one, the
+ * recorded group still runs and its first process's could not, so the record
+ * is kept for a later run that can read it.
+ */
+function refusedNoPs(config: ServeConfig, error: NoPsError, need: string, then: string): string {
+  if (error.pid !== undefined) {
+    return (
+      `refused: no-ps — process group ${error.pid}, recorded in ${STATE_FILE}, still runs, but ` +
+      `when its first process started cannot be read ${startTimeReader(config)}, so whether it ` +
+      "is the server make serve started cannot be told. Nothing was signalled or started, and " +
+      `the record was kept: run make stop where it can be read, or remove ${STATE_FILE} if that ` +
+      "group is not this checkout's server."
+    );
+  }
+  const cannot =
+    process.platform === "linux"
+      ? "/proc cannot be read here"
+      : `${config.ps} is not on the PATH or may not run here, as a sandbox such as Codex's ` +
+        "refuses it";
+  return `refused: no-ps — ${need}, and ${cannot}. ${then}`;
 }
 
 async function serveChecked(
@@ -706,11 +888,12 @@ async function serveChecked(
 ): Promise<number> {
   const { print, lsof } = config;
   requireLsof(lsof);
+  requirePs(config.ps);
 
   // The server serve started earlier, when it still runs here.
   const state = readState(checkout);
   if (state !== undefined) {
-    const owner = ownership(lsof, state, checkout);
+    const owner = ownership(config, state, checkout);
     if (owner === "ours") {
       const listening = readListeners(lsof, [state.port]).filter(
         (listener) => listener.pgid === state.pgid,
@@ -723,7 +906,11 @@ async function serveChecked(
       print(
         `the server make serve started earlier (process group ${state.pgid}) is not listening; stopping it.`,
       );
-      await stopGroup(state.pgid, config.graceMs);
+      const outcome = await stopGroup(state.pgid, config.graceMs);
+      if (outcome !== "stopped") {
+        print(stillRunning(state.pgid, "is not listening", outcome));
+        return EXIT_FAILED;
+      }
     }
     removeState(checkout);
   }
@@ -784,7 +971,13 @@ async function reportOwnServer(
   const { print } = config;
   const wide = beyond(groupListeners(config.lsof, state.pgid));
   if (wide.length > 0) {
-    await stopGroup(state.pgid, config.graceMs);
+    const outcome = await stopGroup(state.pgid, config.graceMs);
+    if (outcome !== "stopped") {
+      print(
+        stillRunning(state.pgid, `listens beyond this machine (${addressesOf(wide)})`, outcome),
+      );
+      return EXIT_FAILED;
+    }
     removeState(checkout);
     print(
       `refused: not-loopback — the server make serve started listened beyond this machine ` +
@@ -807,9 +1000,13 @@ async function reportOwnServer(
     return EXIT_FAILED;
   }
   if (page.status !== 200) {
-    await stopGroup(state.pgid, config.graceMs);
-    removeState(checkout);
+    const outcome = await stopGroup(state.pgid, config.graceMs);
     printLogTail(config, path.join(checkout, LOG_FILE));
+    if (outcome !== "stopped") {
+      print(stillRunning(state.pgid, `did not answer ${url} with 200`, outcome));
+      return EXIT_FAILED;
+    }
+    removeState(checkout);
     print(
       `failed: page ${page.status} — the server make serve started earlier did not answer ${url} ` +
         "with 200, so it was stopped.",
@@ -901,30 +1098,47 @@ async function start(
   // From here the group is stopped unless its page is proven: each verdict
   // below says why, and an error on the way stops it just the same before it
   // propagates. The server is in a session of its own, so the terminal's
-  // Ctrl-C does not reach it; the interruption `exclusive` catches does.
+  // Ctrl-C does not reach it; the interruption `exclusive` catches does. A
+  // group that outlives its stop keeps its record, once it has one, and the
+  // verdict says it still runs rather than the status it was stopped for.
   let settled = false;
-  const giveUp = async (verdict: string, tail = true): Promise<number> => {
+  let recorded = false;
+  const stopStarted = async (): Promise<StopOutcome> => {
+    const outcome = await stopGroup(pgid, config.graceMs);
+    if (outcome === "stopped") removeState(checkout);
+    return outcome;
+  };
+  const giveUp = async (status: string, reason: string, tail = true): Promise<number> => {
     settled = true;
-    await stopGroup(pgid, config.graceMs);
-    removeState(checkout);
+    const outcome = await stopStarted();
     if (tail) printLogTail(config, log);
-    print(verdict);
+    print(
+      outcome === "stopped"
+        ? `${status} — ${reason}`
+        : stillRunning(pgid, `failed to start (${status})`, outcome, recorded),
+    );
     return EXIT_FAILED;
   };
-  const interruptedVerdict = (signal = interrupt.received()) =>
-    `failed: interrupted — ${signal} arrived before the page was proven, so the server was ` +
-    "stopped.";
+  const interrupted = (signal = interrupt.received()) =>
+    giveUp(
+      "failed: interrupted",
+      `${signal} arrived before the page was proven, so the server was stopped.`,
+      false,
+    );
 
   try {
-    const leaderStart = startTimeOf(pgid);
+    const leaderStart = leaderStartOf(pgid, config.ps);
     if (leaderStart === undefined) {
       return await giveUp(
-        `failed: exited — the dev server exited (${exit ?? "at once"}) before it could be recorded.`,
+        "failed: exited",
+        `the dev server exited (${exit ?? "at once"}) before it could be recorded.`,
       );
     }
     const startedAt = new Date().toISOString();
-    const record = (url: string) =>
+    const record = (url: string) => {
       writeState(checkout, { pgid, leaderStart, port, url, log: LOG_FILE, checkout, startedAt });
+      recorded = true;
+    };
     record(urlOf(host.includes(":") ? `[${host}]` : host, port));
     print(`starting the dev server on port ${port} (process group ${pgid}, log ${LOG_FILE})`);
 
@@ -932,17 +1146,19 @@ async function start(
     const deadline = Date.now() + config.waitMs;
     let listening: Listener[] = [];
     for (;;) {
-      if (interrupt.received()) return await giveUp(interruptedVerdict(), false);
+      if (interrupt.received()) return await interrupted();
       listening = readListeners(lsof, [port]).filter((listener) => listener.pgid === pgid);
       if (listening.length > 0) break;
       if (exit !== undefined) {
         return await giveUp(
-          `failed: exited — the dev server exited (${exit}) before it listened on port ${port}.`,
+          "failed: exited",
+          `the dev server exited (${exit}) before it listened on port ${port}.`,
         );
       }
       if (Date.now() >= deadline) {
         return await giveUp(
-          `failed: not-listening — nothing of the dev server listened on port ${port} within ` +
+          "failed: not-listening",
+          `nothing of the dev server listened on port ${port} within ` +
             `${Math.round(config.waitMs / 1000)}s, so it was stopped with everything it started.`,
         );
       }
@@ -954,8 +1170,9 @@ async function start(
     const wide = beyond(groupListeners(lsof, pgid));
     if (wide.length > 0) {
       return await giveUp(
-        `refused: not-loopback — the dev server listened beyond this machine ` +
-          `(${addressesOf(wide)}), so it was stopped before its page was requested.`,
+        "refused: not-loopback",
+        `the dev server listened beyond this machine (${addressesOf(wide)}), so it was stopped ` +
+          "before its page was requested.",
         false,
       );
     }
@@ -963,15 +1180,17 @@ async function start(
     const url = urlOf(loopbackAddressOf(listening), port);
     record(url);
     const page = await requestPage(url, config.pageMs, () => exit === undefined, interrupt.signal);
-    if (interrupt.received()) return await giveUp(interruptedVerdict(), false);
+    if (interrupt.received()) return await interrupted();
     if (page.status === "exited") {
       return await giveUp(
-        `failed: exited — the dev server exited (${exit}) before its page answered.`,
+        "failed: exited",
+        `the dev server exited (${exit}) before its page answered.`,
       );
     }
     if (page.status !== 200) {
       return await giveUp(
-        `failed: page ${page.status} — ${url} did not answer with 200, so the server was stopped.`,
+        `failed: page ${page.status}`,
+        `${url} did not answer with 200, so the server was stopped.`,
       );
     }
 
@@ -979,8 +1198,8 @@ async function start(
     const after = beyond(groupListeners(lsof, pgid));
     if (after.length > 0) {
       return await giveUp(
-        `refused: not-loopback — the dev server listened beyond this machine ` +
-          `(${addressesOf(after)}), so it was stopped.`,
+        "refused: not-loopback",
+        `the dev server listened beyond this machine (${addressesOf(after)}), so it was stopped.`,
         false,
       );
     }
@@ -989,12 +1208,23 @@ async function start(
     print(`serving ${describePage(url, page.title)} (log ${LOG_FILE}); stop it with: make stop`);
     return EXIT_OK;
   } catch (error) {
+    if (error instanceof NoPsError) {
+      // Read for serve's own process a moment ago, so rare: the group could
+      // not be recorded, and one that is not recorded cannot be stopped later.
+      return await giveUp(
+        "failed: no-ps",
+        `when the dev server's first process (pid ${pgid}) started could not be read ` +
+          `${startTimeReader(config)}, so it could not be recorded, and it was stopped.`,
+      );
+    }
     if (!(error instanceof HelperKilledError)) throw error;
-    return await giveUp(interruptedVerdict(error.signal), false);
+    return await interrupted(error.signal);
   } finally {
     if (!settled) {
-      await stopGroup(pgid, config.graceMs);
-      removeState(checkout);
+      const outcome = await stopStarted();
+      if (outcome !== "stopped") {
+        print(stillRunning(pgid, "hit an error while starting", outcome, recorded));
+      }
     }
   }
 }
@@ -1012,13 +1242,30 @@ export async function stop(config: ServeConfig): Promise<number> {
   try {
     return await exclusive(config, checkout, () => stopChecked(config, checkout));
   } catch (error) {
-    if (!(error instanceof NoLsofError)) throw error;
-    print(
-      "refused: no-lsof — make stop checks that the recorded process group still runs in this " +
-        `checkout before signalling it, and ${config.lsof} is not on the PATH or does not take ` +
-        "lsof's options, as BusyBox's does not.",
-    );
-    return EXIT_FAILED;
+    if (error instanceof NoLsofError) {
+      print(
+        error.pgid !== undefined
+          ? unseenGroup(config, error.pgid)
+          : "refused: no-lsof — make stop checks that the recorded process group still runs in " +
+              `this checkout before signalling it, and ${config.lsof} is not on the PATH or does ` +
+              "not take lsof's options, as BusyBox's does not.",
+      );
+      return EXIT_FAILED;
+    }
+    if (error instanceof NoPsError) {
+      print(
+        refusedNoPs(
+          config,
+          error,
+          "make stop signals the recorded process group only once its first process's start " +
+            "time proves it is the server make serve started",
+          `Nothing was signalled, and ${STATE_FILE} was kept, so make stop run where it can ` +
+            "still stops the server.",
+        ),
+      );
+      return EXIT_FAILED;
+    }
+    throw error;
   }
 }
 
@@ -1030,22 +1277,31 @@ async function stopChecked(config: ServeConfig, checkout: string): Promise<numbe
     return EXIT_OK;
   }
   requireLsof(config.lsof);
-  const owner = ownership(config.lsof, state, checkout);
-  removeState(checkout);
+  // Unlike serve, stop does not require ps up front: the record of a group that
+  // has ended is cleared without a start time, and ownership throws NoPsError
+  // for one that still runs and whose start cannot be read.
+  const owner = ownership(config, state, checkout);
   if (owner === "gone") {
+    removeState(checkout);
     print(
       `not-running — the server make serve started (process group ${state.pgid}) has already exited.`,
     );
     return EXIT_OK;
   }
   if (owner === "foreign") {
+    removeState(checkout);
     print(
       `not-running — process group ${state.pgid} is no longer the server make serve started ` +
         "here, so it was left alone.",
     );
     return EXIT_OK;
   }
-  await stopGroup(state.pgid, config.graceMs);
+  const outcome = await stopGroup(state.pgid, config.graceMs);
+  if (outcome !== "stopped") {
+    print(stillRunning(state.pgid, `serves ${state.url}`, outcome));
+    return EXIT_FAILED;
+  }
+  removeState(checkout);
   print(`stopped ${state.url} (process group ${state.pgid})`);
   return EXIT_OK;
 }

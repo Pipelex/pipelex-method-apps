@@ -3,8 +3,8 @@
 // `make serve` and `make stop`, each case against a fake dev server: a process
 // that forks a child to listen, as `next dev` forks `next-server`, so that
 // stopping "the server" is proven to stop everything it started. Every case
-// runs in a checkout of its own, on ports found free, with the real lsof, and
-// the cases that need lsof are skipped where there is none.
+// runs in a checkout of its own, on ports found free, with the real lsof and
+// ps, and the cases that need them are skipped where they cannot run.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import {
@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   devScriptBindsLoopback,
@@ -32,6 +32,7 @@ import {
   LOCK_FILE,
   lsofUsable,
   parseServeArgs,
+  psUsable,
   serve,
   startTimeOf,
   stop,
@@ -48,6 +49,16 @@ const SPAWNS = { timeout: 60_000 };
 // there, so those cases are skipped where no usable lsof is found; the refusal
 // `make serve` gives there is tested anyway.
 const HAS_LSOF = lsofUsable("lsof");
+
+// Every case that starts a server reads its start time too, with ps outside
+// Linux, and a sandbox may refuse to run it, as Codex's does on macOS. Those
+// cases are skipped there, and the refusal is tested with a ps that cannot run.
+const HAS_PS = psUsable("ps");
+const CAN_SERVE = HAS_LSOF && HAS_PS;
+
+// Only outside Linux is the start time read with ps, so only there does a ps
+// that cannot run change what serve does.
+const READS_PS = process.platform !== "linux";
 
 const TEMPLATE_DEV = "next dev -H ${APP_HOST:-127.0.0.1} -p ${APP_PORT:-4300}";
 
@@ -245,6 +256,7 @@ function configFor(
     pageMs: 8_000,
     graceMs: 2_000,
     lsof: "lsof",
+    ps: "ps",
     print: (line) => lines.push(line),
     lines,
     ...overrides,
@@ -273,6 +285,36 @@ function lsofKilledOn(pattern: string): string {
   );
   chmodSync(lsof, 0o755);
   return lsof;
+}
+
+/** A ps that cannot run, as a sandbox's refusal leaves it: the file is there, not executable. */
+function psThatCannotRun(): string {
+  const ps = path.join(tempDir("serve-ps-"), "ps");
+  writeFileSync(ps, '#!/bin/sh\nexec ps "$@"\n');
+  chmodSync(ps, 0o644);
+  return ps;
+}
+
+/**
+ * Run `action` while every signal to a process group is refused, as a sandbox
+ * refuses one to a group started outside it; asking whether a group runs still
+ * answers.
+ */
+async function refusingGroupSignals<T>(action: () => Promise<T>): Promise<T> {
+  const kill = process.kill.bind(process);
+  const refusing = vi
+    .spyOn(process, "kill")
+    .mockImplementation((pid: number, signal?: string | number) => {
+      if (pid < 0 && signal !== 0) {
+        throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+      }
+      return kill(pid, signal);
+    });
+  try {
+    return await action();
+  } finally {
+    refusing.mockRestore();
+  }
 }
 
 function stateOf(checkout: string): ServeState | undefined {
@@ -375,7 +417,22 @@ describe("what is refused or answered before a server is looked for", () => {
     expect(pidsIn(checkout)).toEqual([]);
   });
 
-  it("reads a start time that does not depend on the shell's time zone", () => {
+  it.skipIf(!HAS_LSOF || !READS_PS)(
+    "refuses when ps cannot run, before starting anything",
+    async () => {
+      const checkout = checkoutWith();
+      for (const ps of ["ps-that-is-not-installed", psThatCannotRun()]) {
+        const result = await run(serve, configFor(checkout, "ok", await freePorts(1), { ps }));
+        expect(result.code).toBe(1);
+        expect(result.verdict).toMatch(
+          /^refused: no-ps — make serve reads when the server's first process started, .* Nothing was started/,
+        );
+        expect(pidsIn(checkout)).toEqual([]);
+      }
+    },
+  );
+
+  it.skipIf(!HAS_PS)("reads a start time that does not depend on the shell's time zone", () => {
     const zone = process.env.TZ;
     try {
       process.env.TZ = "UTC";
@@ -389,21 +446,21 @@ describe("what is refused or answered before a server is looked for", () => {
     }
   });
 
-  it.skipIf(process.platform === "linux")(
+  it.skipIf(!READS_PS)(
     "takes a ps killed by a signal for no answer, not for a process that has ended",
     () => {
-      const dir = tempDir("serve-ps-");
-      writeFileSync(path.join(dir, "ps"), "#!/bin/sh\nkill -INT $$\n");
-      chmodSync(path.join(dir, "ps"), 0o755);
-      const search = process.env.PATH;
-      try {
-        process.env.PATH = `${dir}${path.delimiter}${search}`;
-        expect(() => startTimeOf(process.pid)).toThrow(/^SIGINT killed ps before it answered$/);
-      } finally {
-        process.env.PATH = search;
-      }
+      const ps = path.join(tempDir("serve-ps-"), "ps");
+      writeFileSync(ps, "#!/bin/sh\nkill -INT $$\n");
+      chmodSync(ps, 0o755);
+      expect(() => startTimeOf(process.pid, ps)).toThrow(/^SIGINT killed ps before it answered$/);
     },
   );
+
+  it.skipIf(!READS_PS)("takes a ps that cannot run for no answer, and says it cannot read", () => {
+    expect(psUsable("ps-that-is-not-installed")).toBe(false);
+    expect(psUsable(psThatCannotRun())).toBe(false);
+    expect(() => startTimeOf(process.pid, psThatCannotRun())).toThrow("no start time");
+  });
 
   it("says so when nothing was started", async () => {
     const checkout = checkoutWith();
@@ -415,7 +472,7 @@ describe("what is refused or answered before a server is looked for", () => {
   });
 });
 
-describe.skipIf(!HAS_LSOF)("make serve", SPAWNS, () => {
+describe.skipIf(!CAN_SERVE)("make serve", SPAWNS, () => {
   it("starts the server, proves its page, and reports it once", async () => {
     const checkout = checkoutWith();
     const ports = await freePorts(2);
@@ -619,6 +676,55 @@ describe.skipIf(!HAS_LSOF)("make serve", SPAWNS, () => {
     expect(await allGone(pidsIn(checkout))).toBe(true);
   });
 
+  it("keeps the record of a server it could not stop once its start failed", async () => {
+    const checkout = checkoutWith();
+    const config = configFor(checkout, "500", await freePorts(1));
+    const result = await refusingGroupSignals(() => run(serve, config));
+    const recorded = stateOf(checkout)!;
+    expect(result.code).toBe(1);
+    expect(result.verdict).toBe(
+      `failed: still-running — the server make serve started (process group ${recorded.pgid}) ` +
+        "failed to start (failed: page 500), and could not be stopped: the system refused to " +
+        "signal it, as a sandbox refuses a signal to a process started outside it. It is still " +
+        "running and still recorded in .serve/state.json, so make stop run where it may signal " +
+        "the group stops it.",
+    );
+    expect(pidsIn(checkout).every(alive)).toBe(true);
+
+    expect((await run(stop, config)).verdict).toMatch(/^stopped /);
+    expect(await allGone(pidsIn(checkout))).toBe(true);
+  });
+
+  it.skipIf(!READS_PS)("names a server it could not stop and never recorded", async () => {
+    const checkout = checkoutWith();
+    // A ps that answers for serve's own process alone, so the server's start
+    // time cannot be read and the server cannot be recorded.
+    const ps = path.join(tempDir("serve-ps-"), "ps");
+    writeFileSync(
+      ps,
+      `#!/bin/sh\ncase " $* " in *" ${process.pid} "*) exec ps "$@" ;; esac\nexit 1\n`,
+    );
+    chmodSync(ps, 0o755);
+    const config = configFor(checkout, "ok", await freePorts(1), { ps });
+
+    const result = await refusingGroupSignals(() => run(serve, config));
+    const pgid = Number(/process group (\d+)/.exec(result.verdict)?.[1]);
+    try {
+      expect(result.code).toBe(1);
+      expect(result.verdict).toBe(
+        `failed: still-running — the server make serve started (process group ${pgid}) failed ` +
+          "to start (failed: no-ps), and could not be stopped: the system refused to signal it, " +
+          "as a sandbox refuses a signal to a process started outside it. It is still running " +
+          `and was never recorded, so make stop cannot find it: stop it with kill -- -${pgid} ` +
+          "where that is allowed.",
+      );
+      expect(stateOf(checkout)).toBeUndefined();
+      expect(alive(pgid)).toBe(true);
+    } finally {
+      if (pgid > 1) kill(-pgid, "SIGKILL");
+    }
+  });
+
   it("reports a server a person started here, and make stop leaves it alone", async () => {
     const checkout = checkoutWith();
     const ports = await freePorts(2);
@@ -665,7 +771,7 @@ describe.skipIf(!HAS_LSOF)("make serve", SPAWNS, () => {
   });
 });
 
-describe.skipIf(!HAS_LSOF)("make stop", SPAWNS, () => {
+describe.skipIf(!CAN_SERVE)("make stop", SPAWNS, () => {
   it("never signals a recorded group that no longer runs in this checkout", async () => {
     const checkout = checkoutWith();
     const elsewhere = tempDir("serve-recycled-");
@@ -715,6 +821,190 @@ describe.skipIf(!HAS_LSOF)("make stop", SPAWNS, () => {
     expect(await allGone(pidsIn(checkout))).toBe(true);
   });
 
+  it("keeps the record of a running group none of whose processes lsof can see", async () => {
+    const checkout = checkoutWith();
+    const config = configFor(checkout, "ok", await freePorts(1));
+    const started = await run(serve, config);
+    expect(started.code, started.lines.join("\n")).toBe(0);
+    const recorded = stateOf(checkout)!;
+    // An lsof that finds nothing of the group, as one may not look at
+    // processes started outside its sandbox.
+    const lsof = path.join(tempDir("serve-lsof-"), "lsof");
+    writeFileSync(
+      lsof,
+      `#!/bin/sh\ncase " $* " in *" -g ${recorded.pgid} "*) exit 1 ;; esac\nexec lsof "$@"\n`,
+    );
+    chmodSync(lsof, 0o755);
+
+    for (const action of [stop, serve]) {
+      const result = await run(action, { ...config, lsof });
+      expect(result.code).toBe(1);
+      expect(result.verdict).toBe(
+        `refused: no-lsof — process group ${recorded.pgid}, recorded in .serve/state.json, still ` +
+          `runs, but ${lsof} sees none of its processes, so whether it is the server make serve ` +
+          "started here cannot be told. Nothing was signalled or started, and the record was " +
+          "kept: run make stop where lsof can see it, or remove .serve/state.json if that group " +
+          "is not this checkout's server.",
+      );
+      expect(stateOf(checkout)).toEqual(recorded);
+      expect(pidsIn(checkout).every(alive)).toBe(true);
+    }
+
+    expect((await run(stop, config)).verdict).toMatch(/^stopped /);
+    expect(await allGone(pidsIn(checkout))).toBe(true);
+  });
+
+  it.skipIf(!READS_PS)("keeps the record, and the server, when ps cannot run", async () => {
+    // Started where ps may run, then stopped where a sandbox refuses it.
+    const checkout = checkoutWith();
+    const config = configFor(checkout, "ok", await freePorts(1));
+    const started = await run(serve, config);
+    expect(started.code, started.lines.join("\n")).toBe(0);
+    const recorded = stateOf(checkout);
+    const refused = { ...config, ps: psThatCannotRun() };
+
+    const stopping = await run(stop, refused);
+    expect(stopping.code).toBe(1);
+    expect(stopping.verdict).toMatch(
+      /^refused: no-ps — make stop signals the recorded process group only once .* Nothing was signalled, and \.serve\/state\.json was kept/,
+    );
+    expect((await run(serve, refused)).verdict).toMatch(/^refused: no-ps — make serve reads when /);
+    expect(stateOf(checkout)).toEqual(recorded);
+    expect(pidsIn(checkout).every(alive)).toBe(true);
+
+    expect((await run(stop, config)).verdict).toMatch(/^stopped /);
+    expect(await allGone(pidsIn(checkout))).toBe(true);
+  });
+
+  it.skipIf(!READS_PS)(
+    "clears the record of a server that has ended, even where ps cannot run",
+    async () => {
+      const checkout = checkoutWith();
+      const config = configFor(checkout, "ok", await freePorts(1));
+      const started = await run(serve, config);
+      expect(started.code, started.lines.join("\n")).toBe(0);
+      const recorded = stateOf(checkout)!;
+      const pids = pidsIn(checkout);
+      for (const pid of pids) kill(pid, "SIGKILL");
+      expect(await allGone(pids)).toBe(true);
+
+      const result = await run(stop, { ...config, ps: psThatCannotRun() });
+      expect(result.code).toBe(0);
+      expect(result.verdict).toBe(
+        `not-running — the server make serve started (process group ${recorded.pgid}) has ` +
+          "already exited.",
+      );
+      expect(stateOf(checkout)).toBeUndefined();
+    },
+  );
+
+  it.skipIf(!READS_PS)(
+    "stops a server whose first process has ended without reading a start time",
+    async () => {
+      const checkout = checkoutWith();
+      const config = configFor(checkout, "ok", await freePorts(1));
+      const started = await run(serve, config);
+      expect(started.code, started.lines.join("\n")).toBe(0);
+      const [parent, child] = pidsIn(checkout);
+      kill(parent, "SIGKILL");
+      expect(await allGone([parent])).toBe(true);
+      expect(alive(child)).toBe(true);
+
+      const result = await run(stop, { ...config, ps: psThatCannotRun() });
+      expect(result.verdict).toMatch(/^stopped /);
+      expect(await allGone([child])).toBe(true);
+      expect(stateOf(checkout)).toBeUndefined();
+    },
+  );
+
+  it.skipIf(!READS_PS)(
+    "never takes a start time it cannot read for another process's",
+    async () => {
+      const checkout = checkoutWith();
+      const config = configFor(checkout, "ok", await freePorts(1));
+      const started = await run(serve, config);
+      expect(started.code, started.lines.join("\n")).toBe(0);
+      const recorded = stateOf(checkout)!;
+      // A ps that runs, and answers for every process but the group's first,
+      // as one that cannot see it would: nothing, and a failure.
+      const ps = path.join(tempDir("serve-ps-"), "ps");
+      writeFileSync(
+        ps,
+        `#!/bin/sh\ncase " $* " in *" ${recorded.pgid} "*) exit 1 ;; esac\nexec ps "$@"\n`,
+      );
+      chmodSync(ps, 0o755);
+
+      for (const action of [stop, serve]) {
+        const result = await run(action, { ...config, ps });
+        expect(result.code).toBe(1);
+        expect(result.verdict).toMatch(
+          new RegExp(
+            `^refused: no-ps — process group ${recorded.pgid}, recorded in \\.serve/state\\.json, ` +
+              "still runs, but when its first process started cannot be read",
+          ),
+        );
+        expect(stateOf(checkout)).toEqual(recorded);
+        expect(pidsIn(checkout).every(alive)).toBe(true);
+      }
+
+      expect((await run(stop, config)).verdict).toMatch(/^stopped /);
+      expect(await allGone(pidsIn(checkout))).toBe(true);
+    },
+  );
+
+  it("keeps the record of a server the system refuses to let it signal", async () => {
+    const checkout = checkoutWith();
+    const config = configFor(checkout, "ok", await freePorts(1));
+    const started = await run(serve, config);
+    expect(started.code, started.lines.join("\n")).toBe(0);
+    const recorded = stateOf(checkout)!;
+    const [parent, child] = pidsIn(checkout);
+
+    // As a sandbox answers a signal to a group started outside it.
+    const kill = process.kill.bind(process);
+    const refusing = vi
+      .spyOn(process, "kill")
+      .mockImplementation((pid: number, signal?: string | number) => {
+        if (pid === -recorded.pgid) {
+          throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+        }
+        return kill(pid, signal);
+      });
+    try {
+      const stopping = await run(stop, config);
+      expect(stopping.code).toBe(1);
+      expect(stopping.verdict).toBe(
+        `failed: still-running — the server make serve started (process group ${recorded.pgid}) ` +
+          `serves ${recorded.url}, and could not be stopped: the system refused to signal it, as ` +
+          "a sandbox refuses a signal to a process started outside it. It is still running and " +
+          "still recorded in .serve/state.json, so make stop run where it may signal the group " +
+          "stops it.",
+      );
+      expect(stateOf(checkout)).toEqual(recorded);
+
+      // Ours, and not listening: serve means to stop it before starting afresh.
+      kill(child, "SIGKILL");
+      expect(await allGone([child])).toBe(true);
+      const serving = await run(serve, config);
+      expect(serving.code).toBe(1);
+      expect(serving.verdict).toMatch(
+        new RegExp(
+          "^failed: still-running — the server make serve started \\(process group " +
+            `${recorded.pgid}\\) is not listening, and could not be stopped`,
+        ),
+      );
+      expect(stateOf(checkout)).toEqual(recorded);
+      expect(alive(parent)).toBe(true);
+    } finally {
+      refusing.mockRestore();
+    }
+
+    const restarted = await run(serve, config);
+    expect(restarted.verdict, restarted.lines.join("\n")).toMatch(/^serving /);
+    expect(alive(parent)).toBe(false);
+    expect((await run(stop, config)).verdict).toMatch(/^stopped /);
+  });
+
   it("never signals a recorded group whose first process is another one, even here", async () => {
     // A stale record whose id now names a process started in this checkout —
     // a shell, an editor, or the make running the command.
@@ -742,7 +1032,7 @@ describe.skipIf(!HAS_LSOF)("make stop", SPAWNS, () => {
   });
 });
 
-describe.skipIf(!HAS_LSOF)("the command that started it", SPAWNS, () => {
+describe.skipIf(!CAN_SERVE)("the command that started it", SPAWNS, () => {
   const LIB = path.join(import.meta.dirname, "serve.mts");
 
   /** Run serve in a process of its own, as `make serve` does, and hand it back. */
@@ -759,7 +1049,7 @@ describe.skipIf(!HAS_LSOF)("the command that started it", SPAWNS, () => {
         `process.exitCode = await serve({ checkout: ${JSON.stringify(checkout)}, ` +
         `command: [process.execPath, "fake-dev.mjs", "parent", ${JSON.stringify(mode)}], ` +
         `host: "127.0.0.1", ports: ${JSON.stringify(ports)}, waitMs: ${waitMs}, pageMs: 8000, ` +
-        `graceMs: 2000, lsof: "lsof", print: (line) => console.log(line) });\n`,
+        `graceMs: 2000, lsof: "lsof", ps: "ps", print: (line) => console.log(line) });\n`,
     );
     const child = spawn(process.execPath, ["--experimental-strip-types", "--no-warnings", script], {
       cwd: checkout,
