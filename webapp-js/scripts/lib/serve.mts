@@ -43,7 +43,8 @@
  *    started when the record says, and one of the group's processes runs in
  *    this checkout: a stale record whose id now names a shell, an editor or the
  *    very `make` running the command is never signalled. A start time that
- *    cannot be read proves neither way, so the record is kept and nothing is
+ *    cannot be read proves neither way, and nor does a running group none of
+ *    whose processes `lsof` can see, so the record is kept and nothing is
  *    signalled.
  *  - **A record goes only with its server.** It is removed once its group has
  *    ended or is proven another's, never on a stop the system refused, as a
@@ -166,7 +167,18 @@ export interface ServeState {
   startedAt: string;
 }
 
-class NoLsofError extends Error {}
+/**
+ * An lsof serve cannot read: missing, or not taking lsof's options, or, with
+ * `pgid`, one that sees none of a recorded group's processes while the group
+ * still runs.
+ */
+class NoLsofError extends Error {
+  readonly pgid?: number;
+  constructor(pgid?: number) {
+    super(pgid === undefined ? "no usable lsof" : `lsof sees no process of group ${pgid}`);
+    this.pgid = pgid;
+  }
+}
 
 /**
  * A start time serve needs and cannot read: its own process's, when `ps` cannot
@@ -514,7 +526,8 @@ function removeState(checkout: string): void {
  * checkout: `gone` when no process of it runs, `foreign` when its id now names
  * another group, or when its processes run elsewhere, as in a checkout copied
  * with its `.serve/`. A first process whose start time cannot be read is
- * neither, and throws `NoPsError`.
+ * neither, and throws `NoPsError`; a running group none of whose processes
+ * lsof can see is neither too, and throws `NoLsofError`.
  */
 function ownership(
   config: ServeConfig,
@@ -528,8 +541,25 @@ function ownership(
   const leaderStart = leaderStartOf(state.pgid, config.ps);
   if (leaderStart !== undefined && leaderStart !== state.leaderStart) return "foreign";
   const cwds = groupCwds(config.lsof, state.pgid);
-  if (cwds.length === 0) return "gone";
-  return cwds.includes(checkout) ? "ours" : "foreign";
+  if (cwds.length > 0) return cwds.includes(checkout) ? "ours" : "foreign";
+  // Nothing seen: the group has ended since, or lsof may not look at its
+  // processes, which proves neither way.
+  if (!groupAlive(state.pgid)) return "gone";
+  throw new NoLsofError(state.pgid);
+}
+
+/**
+ * The `refused: no-lsof` verdict for a recorded group that still runs where
+ * lsof sees none of its processes.
+ */
+function unseenGroup(config: ServeConfig, pgid: number): string {
+  return (
+    `refused: no-lsof — process group ${pgid}, recorded in ${STATE_FILE}, still runs, but ` +
+    `${config.lsof} sees none of its processes, so whether it is the server make serve started ` +
+    "here cannot be told. Nothing was signalled or started, and the record was kept: run make " +
+    `stop where lsof can see it, or remove ${STATE_FILE} if that group is not this checkout's ` +
+    "server."
+  );
 }
 
 // ── The page ────────────────────────────────────────────────────────────────
@@ -802,9 +832,11 @@ export async function serve(config: ServeConfig): Promise<number> {
   } catch (error) {
     if (error instanceof NoLsofError) {
       print(
-        `refused: no-lsof — make serve reads who holds the port with lsof, and ${config.lsof} ` +
-          "is not on the PATH or does not take lsof's options, as BusyBox's does not. Install " +
-          "lsof, or run make dev in the foreground.",
+        error.pgid !== undefined
+          ? unseenGroup(config, error.pgid)
+          : `refused: no-lsof — make serve reads who holds the port with lsof, and ${config.lsof} ` +
+              "is not on the PATH or does not take lsof's options, as BusyBox's does not. " +
+              "Install lsof, or run make dev in the foreground.",
       );
       return EXIT_FAILED;
     }
@@ -1212,9 +1244,11 @@ export async function stop(config: ServeConfig): Promise<number> {
   } catch (error) {
     if (error instanceof NoLsofError) {
       print(
-        "refused: no-lsof — make stop checks that the recorded process group still runs in this " +
-          `checkout before signalling it, and ${config.lsof} is not on the PATH or does not take ` +
-          "lsof's options, as BusyBox's does not.",
+        error.pgid !== undefined
+          ? unseenGroup(config, error.pgid)
+          : "refused: no-lsof — make stop checks that the recorded process group still runs in " +
+              `this checkout before signalling it, and ${config.lsof} is not on the PATH or does ` +
+              "not take lsof's options, as BusyBox's does not.",
       );
       return EXIT_FAILED;
     }

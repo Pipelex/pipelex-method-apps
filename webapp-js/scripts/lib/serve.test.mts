@@ -821,6 +821,39 @@ describe.skipIf(!CAN_SERVE)("make stop", SPAWNS, () => {
     expect(await allGone(pidsIn(checkout))).toBe(true);
   });
 
+  it("keeps the record of a running group none of whose processes lsof can see", async () => {
+    const checkout = checkoutWith();
+    const config = configFor(checkout, "ok", await freePorts(1));
+    const started = await run(serve, config);
+    expect(started.code, started.lines.join("\n")).toBe(0);
+    const recorded = stateOf(checkout)!;
+    // An lsof that finds nothing of the group, as one may not look at
+    // processes started outside its sandbox.
+    const lsof = path.join(tempDir("serve-lsof-"), "lsof");
+    writeFileSync(
+      lsof,
+      `#!/bin/sh\ncase " $* " in *" -g ${recorded.pgid} "*) exit 1 ;; esac\nexec lsof "$@"\n`,
+    );
+    chmodSync(lsof, 0o755);
+
+    for (const action of [stop, serve]) {
+      const result = await run(action, { ...config, lsof });
+      expect(result.code).toBe(1);
+      expect(result.verdict).toBe(
+        `refused: no-lsof — process group ${recorded.pgid}, recorded in .serve/state.json, still ` +
+          `runs, but ${lsof} sees none of its processes, so whether it is the server make serve ` +
+          "started here cannot be told. Nothing was signalled or started, and the record was " +
+          "kept: run make stop where lsof can see it, or remove .serve/state.json if that group " +
+          "is not this checkout's server.",
+      );
+      expect(stateOf(checkout)).toEqual(recorded);
+      expect(pidsIn(checkout).every(alive)).toBe(true);
+    }
+
+    expect((await run(stop, config)).verdict).toMatch(/^stopped /);
+    expect(await allGone(pidsIn(checkout))).toBe(true);
+  });
+
   it.skipIf(!READS_PS)("keeps the record, and the server, when ps cannot run", async () => {
     // Started where ps may run, then stopped where a sandbox refuses it.
     const checkout = checkoutWith();
