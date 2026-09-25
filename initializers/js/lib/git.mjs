@@ -116,16 +116,21 @@ export function readGit({ dest, from, destExists, destHasGit, env }) {
  * directory is named from its parent, with no slash, since asked from inside
  * it as `./` git tests it with one. The name starts with `./` because git
  * reads a leading `:` as pathspec magic, and `--literal-pathspecs` is refused
- * by `check-ignore`. Any answer but a plain yes, a directory that cannot be
- * made included, reads as not ignored, since mistaking a tracked destination
- * for an ignored one would plant a repository in the user's tracked tree. A
- * directory that holds a tracked path reads as not ignored whatever the
- * patterns say, but a destination the preflight accepts holds none.
+ * by `check-ignore`. The directory is named where it physically is: a
+ * destination that is a symlink sits in one repository's work tree and points
+ * into another's, the one every other reading of the destination sees, and
+ * that one is the repository whose ignores count. Any answer but a plain yes, a
+ * directory that cannot be made or resolved included, reads as not ignored,
+ * since mistaking a tracked destination for an ignored one would plant a
+ * repository in the user's tracked tree. A directory that holds a tracked path
+ * reads as not ignored whatever the patterns say, whether or not its files are
+ * still on disk.
  */
 function ignores({ dest, from, env }) {
   return withDirectories({ dest, from }, false, () => {
-    const name = `./${path.basename(dest)}`;
-    return git(["check-ignore", "-q", "--", name], { cwd: path.dirname(dest), env }).status === 0;
+    const real = fs.realpathSync(dest);
+    const name = `./${path.basename(real)}`;
+    return git(["check-ignore", "-q", "--", name], { cwd: path.dirname(real), env }).status === 0;
   });
 }
 
