@@ -1,5 +1,14 @@
 # Changelog
 
+## [v0.5.5] - 2026-09-25
+
+### Fixed
+
+- **`make serve` where `ps` may not run**: in a sandbox that refuses `ps`, as Codex's `workspace-write` sandbox does on macOS, the web app template's `make serve` now refuses with `refused: no-ps` before starting anything, where it used to start the server, stop it again and report `failed: exited` as if it had exited at once.
+- **`make stop` keeps the record of a server it cannot identify**: while the recorded server's first process runs where `ps` may not, or its group runs where `lsof` sees none of its processes, `make stop` now refuses and keeps `.serve/state.json`, where it used to take the server for another process or for one that had ended, drop its record and report `not-running` while it still listened. The record of a server that has ended is still cleared.
+- **`failed: still-running`**: a server that `make serve` or `make stop` meant to stop and could not, because the system refused the signal or it outlived `SIGKILL`, is now reported as `failed: still-running` with its record kept, where it used to be reported as stopped and its record dropped.
+- **`make all` where `ps` may not run**: a project's tests now skip the cases that start a server where `ps` may not run, so its `make all` passes in such a sandbox instead of failing.
+
 ## [v0.5.4] - 2026-09-25
 
 ### Changed
