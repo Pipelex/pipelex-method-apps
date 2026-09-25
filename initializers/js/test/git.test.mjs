@@ -106,12 +106,13 @@ describe("readGit inside another repository's work tree", () => {
 
   it("reads a symlinked destination by the ignores of the repository it points into", () => {
     const { root, repo, env } = enclosing(["link"]);
+    const setup = setupEnv(root);
     const theirs = path.join(root, "other");
     fs.mkdirSync(theirs);
-    git(theirs, ["init", "-q", "-b", "main"], env);
+    git(theirs, ["init", "-q", "-b", "main"], setup);
     fs.writeFileSync(path.join(theirs, "README.md"), "other\n");
-    git(theirs, ["add", "-A"], env);
-    git(theirs, ["commit", "-q", "-m", "Other first commit"], env);
+    git(theirs, ["add", "-A"], setup);
+    git(theirs, ["commit", "-q", "-m", "Other first commit"], setup);
     const target = path.join(theirs, "apps", "new");
     fs.mkdirSync(target, { recursive: true });
     const link = path.join(repo, "link");
