@@ -19,7 +19,7 @@
  *   failed: interrupted
  *   failed: still-running                        a server of serve's that it
  *                                                meant to stop still runs, and
- *                                                stays recorded
+ *                                                stays recorded if it was
  *   stopped, not-running                         make stop
  *
  * These rules make the verdict true rather than hopeful:
@@ -59,7 +59,9 @@
  *    the checkout's real path, in the letter case the disk has.
  *  - **Nothing unproven is left running.** A server whose port does not open in
  *    time, that exits, whose page does not answer `200`, or whose start is
- *    interrupted or broken by an error, is stopped with every process under it.
+ *    interrupted or broken by an error, is stopped with every process under it,
+ *    and one the system will not let serve stop is reported as still running,
+ *    never as stopped.
  *
  * Serve never stops what it did not start: a server a person started from this
  * checkout is reported and left alone, and a port another directory holds is
@@ -463,20 +465,24 @@ export async function stopGroup(pgid: number, graceMs: number): Promise<StopOutc
 }
 
 /**
- * The verdict for a recorded group serve or stop meant to stop and could not,
- * `why` saying why it was stopping it. Its record is kept, so a later make stop
- * still finds it.
+ * The verdict for a group serve or stop meant to stop and could not, `why`
+ * saying why it was stopping it. Its record is kept, so a later make stop still
+ * finds it; one a failed start never recorded is named for a person to stop.
  */
-function stillRunning(pgid: number, why: string, outcome: StopOutcome): string {
+function stillRunning(pgid: number, why: string, outcome: StopOutcome, recorded = true): string {
   const cause =
     outcome === "refused"
       ? "the system refused to signal it, as a sandbox refuses a signal to a process started " +
         "outside it"
       : "it outlived SIGKILL";
+  const then = recorded
+    ? `It is still running and still recorded in ${STATE_FILE}, so make stop run where it may ` +
+      "signal the group stops it."
+    : "It is still running and was never recorded, so make stop cannot find it: stop it with " +
+      `kill -- -${pgid} where that is allowed.`;
   return (
     `failed: still-running — the server make serve started (process group ${pgid}) ${why}, ` +
-    `and could not be stopped: ${cause}. It is still running and still recorded in ` +
-    `${STATE_FILE}, so make stop run where it may signal the group stops it.`
+    `and could not be stopped: ${cause}. ${then}`
   );
 }
 
@@ -1060,30 +1066,47 @@ async function start(
   // From here the group is stopped unless its page is proven: each verdict
   // below says why, and an error on the way stops it just the same before it
   // propagates. The server is in a session of its own, so the terminal's
-  // Ctrl-C does not reach it; the interruption `exclusive` catches does.
+  // Ctrl-C does not reach it; the interruption `exclusive` catches does. A
+  // group that outlives its stop keeps its record, once it has one, and the
+  // verdict says it still runs rather than the status it was stopped for.
   let settled = false;
-  const giveUp = async (verdict: string, tail = true): Promise<number> => {
+  let recorded = false;
+  const stopStarted = async (): Promise<StopOutcome> => {
+    const outcome = await stopGroup(pgid, config.graceMs);
+    if (outcome === "stopped") removeState(checkout);
+    return outcome;
+  };
+  const giveUp = async (status: string, reason: string, tail = true): Promise<number> => {
     settled = true;
-    await stopGroup(pgid, config.graceMs);
-    removeState(checkout);
+    const outcome = await stopStarted();
     if (tail) printLogTail(config, log);
-    print(verdict);
+    print(
+      outcome === "stopped"
+        ? `${status} — ${reason}`
+        : stillRunning(pgid, `failed to start (${status})`, outcome, recorded),
+    );
     return EXIT_FAILED;
   };
-  const interruptedVerdict = (signal = interrupt.received()) =>
-    `failed: interrupted — ${signal} arrived before the page was proven, so the server was ` +
-    "stopped.";
+  const interrupted = (signal = interrupt.received()) =>
+    giveUp(
+      "failed: interrupted",
+      `${signal} arrived before the page was proven, so the server was stopped.`,
+      false,
+    );
 
   try {
     const leaderStart = leaderStartOf(pgid, config.ps);
     if (leaderStart === undefined) {
       return await giveUp(
-        `failed: exited — the dev server exited (${exit ?? "at once"}) before it could be recorded.`,
+        "failed: exited",
+        `the dev server exited (${exit ?? "at once"}) before it could be recorded.`,
       );
     }
     const startedAt = new Date().toISOString();
-    const record = (url: string) =>
+    const record = (url: string) => {
       writeState(checkout, { pgid, leaderStart, port, url, log: LOG_FILE, checkout, startedAt });
+      recorded = true;
+    };
     record(urlOf(host.includes(":") ? `[${host}]` : host, port));
     print(`starting the dev server on port ${port} (process group ${pgid}, log ${LOG_FILE})`);
 
@@ -1091,17 +1114,19 @@ async function start(
     const deadline = Date.now() + config.waitMs;
     let listening: Listener[] = [];
     for (;;) {
-      if (interrupt.received()) return await giveUp(interruptedVerdict(), false);
+      if (interrupt.received()) return await interrupted();
       listening = readListeners(lsof, [port]).filter((listener) => listener.pgid === pgid);
       if (listening.length > 0) break;
       if (exit !== undefined) {
         return await giveUp(
-          `failed: exited — the dev server exited (${exit}) before it listened on port ${port}.`,
+          "failed: exited",
+          `the dev server exited (${exit}) before it listened on port ${port}.`,
         );
       }
       if (Date.now() >= deadline) {
         return await giveUp(
-          `failed: not-listening — nothing of the dev server listened on port ${port} within ` +
+          "failed: not-listening",
+          `nothing of the dev server listened on port ${port} within ` +
             `${Math.round(config.waitMs / 1000)}s, so it was stopped with everything it started.`,
         );
       }
@@ -1113,8 +1138,9 @@ async function start(
     const wide = beyond(groupListeners(lsof, pgid));
     if (wide.length > 0) {
       return await giveUp(
-        `refused: not-loopback — the dev server listened beyond this machine ` +
-          `(${addressesOf(wide)}), so it was stopped before its page was requested.`,
+        "refused: not-loopback",
+        `the dev server listened beyond this machine (${addressesOf(wide)}), so it was stopped ` +
+          "before its page was requested.",
         false,
       );
     }
@@ -1122,15 +1148,17 @@ async function start(
     const url = urlOf(loopbackAddressOf(listening), port);
     record(url);
     const page = await requestPage(url, config.pageMs, () => exit === undefined, interrupt.signal);
-    if (interrupt.received()) return await giveUp(interruptedVerdict(), false);
+    if (interrupt.received()) return await interrupted();
     if (page.status === "exited") {
       return await giveUp(
-        `failed: exited — the dev server exited (${exit}) before its page answered.`,
+        "failed: exited",
+        `the dev server exited (${exit}) before its page answered.`,
       );
     }
     if (page.status !== 200) {
       return await giveUp(
-        `failed: page ${page.status} — ${url} did not answer with 200, so the server was stopped.`,
+        `failed: page ${page.status}`,
+        `${url} did not answer with 200, so the server was stopped.`,
       );
     }
 
@@ -1138,8 +1166,8 @@ async function start(
     const after = beyond(groupListeners(lsof, pgid));
     if (after.length > 0) {
       return await giveUp(
-        `refused: not-loopback — the dev server listened beyond this machine ` +
-          `(${addressesOf(after)}), so it was stopped.`,
+        "refused: not-loopback",
+        `the dev server listened beyond this machine (${addressesOf(after)}), so it was stopped.`,
         false,
       );
     }
@@ -1152,16 +1180,19 @@ async function start(
       // Read for serve's own process a moment ago, so rare: the group could
       // not be recorded, and one that is not recorded cannot be stopped later.
       return await giveUp(
-        `failed: no-ps — when the dev server's first process (pid ${pgid}) started could not ` +
-          `be read ${startTimeReader(config)}, so it could not be recorded, and it was stopped.`,
+        "failed: no-ps",
+        `when the dev server's first process (pid ${pgid}) started could not be read ` +
+          `${startTimeReader(config)}, so it could not be recorded, and it was stopped.`,
       );
     }
     if (!(error instanceof HelperKilledError)) throw error;
-    return await giveUp(interruptedVerdict(error.signal), false);
+    return await interrupted(error.signal);
   } finally {
     if (!settled) {
-      await stopGroup(pgid, config.graceMs);
-      removeState(checkout);
+      const outcome = await stopStarted();
+      if (outcome !== "stopped") {
+        print(stillRunning(pgid, "hit an error while starting", outcome, recorded));
+      }
     }
   }
 }

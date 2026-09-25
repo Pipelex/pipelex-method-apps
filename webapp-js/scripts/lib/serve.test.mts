@@ -295,6 +295,28 @@ function psThatCannotRun(): string {
   return ps;
 }
 
+/**
+ * Run `action` while every signal to a process group is refused, as a sandbox
+ * refuses one to a group started outside it; asking whether a group runs still
+ * answers.
+ */
+async function refusingGroupSignals<T>(action: () => Promise<T>): Promise<T> {
+  const kill = process.kill.bind(process);
+  const refusing = vi
+    .spyOn(process, "kill")
+    .mockImplementation((pid: number, signal?: string | number) => {
+      if (pid < 0 && signal !== 0) {
+        throw Object.assign(new Error("kill EPERM"), { code: "EPERM" });
+      }
+      return kill(pid, signal);
+    });
+  try {
+    return await action();
+  } finally {
+    refusing.mockRestore();
+  }
+}
+
 function stateOf(checkout: string): ServeState | undefined {
   const file = path.join(checkout, STATE_FILE);
   return existsSync(file) ? (JSON.parse(readFileSync(file, "utf-8")) as ServeState) : undefined;
@@ -652,6 +674,55 @@ describe.skipIf(!CAN_SERVE)("make serve", SPAWNS, () => {
       new RegExp(`^failed: page 500 — http://127\\.0\\.0\\.1:${ports[0]}/ did not answer with 200`),
     );
     expect(await allGone(pidsIn(checkout))).toBe(true);
+  });
+
+  it("keeps the record of a server it could not stop once its start failed", async () => {
+    const checkout = checkoutWith();
+    const config = configFor(checkout, "500", await freePorts(1));
+    const result = await refusingGroupSignals(() => run(serve, config));
+    const recorded = stateOf(checkout)!;
+    expect(result.code).toBe(1);
+    expect(result.verdict).toBe(
+      `failed: still-running — the server make serve started (process group ${recorded.pgid}) ` +
+        "failed to start (failed: page 500), and could not be stopped: the system refused to " +
+        "signal it, as a sandbox refuses a signal to a process started outside it. It is still " +
+        "running and still recorded in .serve/state.json, so make stop run where it may signal " +
+        "the group stops it.",
+    );
+    expect(pidsIn(checkout).every(alive)).toBe(true);
+
+    expect((await run(stop, config)).verdict).toMatch(/^stopped /);
+    expect(await allGone(pidsIn(checkout))).toBe(true);
+  });
+
+  it.skipIf(!READS_PS)("names a server it could not stop and never recorded", async () => {
+    const checkout = checkoutWith();
+    // A ps that answers for serve's own process alone, so the server's start
+    // time cannot be read and the server cannot be recorded.
+    const ps = path.join(tempDir("serve-ps-"), "ps");
+    writeFileSync(
+      ps,
+      `#!/bin/sh\ncase " $* " in *" ${process.pid} "*) exec ps "$@" ;; esac\nexit 1\n`,
+    );
+    chmodSync(ps, 0o755);
+    const config = configFor(checkout, "ok", await freePorts(1), { ps });
+
+    const result = await refusingGroupSignals(() => run(serve, config));
+    const pgid = Number(/process group (\d+)/.exec(result.verdict)?.[1]);
+    try {
+      expect(result.code).toBe(1);
+      expect(result.verdict).toBe(
+        `failed: still-running — the server make serve started (process group ${pgid}) failed ` +
+          "to start (failed: no-ps), and could not be stopped: the system refused to signal it, " +
+          "as a sandbox refuses a signal to a process started outside it. It is still running " +
+          `and was never recorded, so make stop cannot find it: stop it with kill -- -${pgid} ` +
+          "where that is allowed.",
+      );
+      expect(stateOf(checkout)).toBeUndefined();
+      expect(alive(pgid)).toBe(true);
+    } finally {
+      if (pgid > 1) kill(-pgid, "SIGKILL");
+    }
   });
 
   it("reports a server a person started here, and make stop leaves it alone", async () => {
