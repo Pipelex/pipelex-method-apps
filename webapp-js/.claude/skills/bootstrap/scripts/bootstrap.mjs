@@ -319,6 +319,7 @@ The server listens on loopback only, because anyone who can reach it runs method
 - [\`docs/add-method.md\`](docs/add-method.md) — adding a method, and removing one.
 - [\`docs/codegen.md\`](docs/codegen.md) — the generated types and the checks that keep them current.
 - [\`docs/input-form.md\`](docs/input-form.md) — how the input form and the result view are rendered from a method's contract.
+- [\`docs/errors.md\`](docs/errors.md) — what a person reads when something fails, and where a failed run's reason comes from.
 - [\`CLAUDE.md\`](CLAUDE.md) — the project guide for coding agents.
 
 ## License
