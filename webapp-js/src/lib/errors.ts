@@ -508,13 +508,16 @@ function retryAdvice(retryable: boolean): RetryAdvice {
 }
 
 /**
- * The runtime's next step, as a hint. `wait_and_retry` advice is written while
- * the runtime is still retrying ("the system will retry automatically"); what
- * this app shows has stopped, and nothing retries it, so that advice is
- * dropped and the retry line says what to do instead.
+ * The runtime's next step, as a hint. Two kinds of advice are dropped. A
+ * `wait_and_retry` advice is written while the runtime is still retrying ("the
+ * system will retry automatically"); what this app shows has stopped, and
+ * nothing retries it, so the retry line says what to do instead. An `unknown`
+ * advice is the runtime's fallback when no cause advised anything, and it
+ * points at developer fields the display never shows ("Check pipe_stack to
+ * identify which pipe failed") or back at the message already shown.
  */
 function nextStepOf(action: UserAction | null | undefined): string | undefined {
-  if (action?.kind === "wait_and_retry") return undefined;
+  if (action?.kind === "wait_and_retry" || action?.kind === "unknown") return undefined;
   return nonEmpty(action?.detail);
 }
 

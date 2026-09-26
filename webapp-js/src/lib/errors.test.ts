@@ -638,6 +638,29 @@ describe("classifyPipelineError — a refusal's problem document", () => {
     expect(result.hint).toBeUndefined();
   });
 
+  it("keeps the status's hint when the runtime's advice is its unknown fallback", () => {
+    const err = new ApiResponseError(
+      "API POST /v1/execute failed (500)",
+      "http://localhost:8081",
+      500,
+      "Internal Server Error",
+      "{}",
+      "PipelineExecutionError",
+      "Pipe 'summarize' failed.",
+      undefined,
+      undefined,
+      {
+        problem: {
+          userAction: { kind: "unknown", detail: "Check pipe_stack to identify which pipe failed" },
+        },
+      },
+    );
+    const result = classifyPipelineError(err, OVERRIDE_ENV);
+    expect(result.kind).toBe("server_error");
+    expect(result.hint).toBeUndefined();
+    expect(JSON.stringify(result)).not.toContain("Check pipe_stack");
+  });
+
   it("keeps its curated hint for a server error whose document advises nothing", () => {
     const err = new ApiResponseError(
       "API POST /v1/execute failed (500)",
