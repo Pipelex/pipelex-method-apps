@@ -47,6 +47,7 @@ describe("ErrorDisplay — a failed run", () => {
 
   it("offers a re-run for a retryable failure", () => {
     showFailedRun(RATE_LIMITED, `Run finished with status FAILED: ${RATE_LIMITED.message}`);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/retry automatically/);
     expect(
       screen.getByText("This failure can pass on a second try: run it again."),
     ).toBeInTheDocument();

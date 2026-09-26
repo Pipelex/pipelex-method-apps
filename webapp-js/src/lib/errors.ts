@@ -449,7 +449,14 @@ function classifyRunFailed(err: RunFailedError, finishedAt?: string | null): Pip
   const message =
     visibleReportMessage(report) ??
     `The run ended ${err.status}, and its error report does not say why.`;
-  const nextStep = nonEmpty(report.user_action?.detail);
+  // `wait_and_retry` advice is written while the runtime is still retrying
+  // ("the system will retry automatically"). A failed run has stopped, and
+  // nothing retries it, so that advice is dropped and the retry line says
+  // what to do instead.
+  const nextStep =
+    report.user_action?.kind === "wait_and_retry"
+      ? undefined
+      : nonEmpty(report.user_action?.detail);
   const endedAt = formatInstant(finishedAt);
   return {
     kind: "run_failed",

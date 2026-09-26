@@ -210,7 +210,7 @@ describe("pollDurableRun", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.message).not.toContain("no result available");
-    expect(result.error.hint?.summary).toBe(RATE_LIMITED.user_action?.detail);
+    expect(result.error.hint).toBeUndefined(); // wait_and_retry advice is stale on a failed run
     expect(result.error.retry?.retryable).toBe(true);
     expect(result.error.support).toBe("run run-1 · LLMCompletionError");
   });

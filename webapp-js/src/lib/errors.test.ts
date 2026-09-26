@@ -504,7 +504,9 @@ describe("classifyPipelineError — a failed run's stored error report", () => {
       retryable: true,
       summary: "This failure can pass on a second try: run it again.",
     });
-    expect(result.hint?.summary).toBe(RATE_LIMITED.user_action?.detail);
+    // "The system will retry automatically" is untrue of a run that ended, so
+    // the retry line is the only advice.
+    expect(result.hint).toBeUndefined();
   });
 
   it("keeps the provider's raw text out of everything the person can read", () => {
