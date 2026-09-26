@@ -5,6 +5,7 @@
 ### Fixed
 
 - **A failed durable run says why**: the web app template's failure display now reads a failed run's stored error report and shows the runtime's reason with the failing pipe, its advice as the next step, whether running it again can help, and a line to quote to support with the run id, the error type and when the run ended, where it used to show only "Run finished with status FAILED; no result available". A model provider's raw error text is kept out of everything the person can read, and a run that ended with no stored report keeps the old sentence.
+- **A refused run says what to do**: when the runner refuses to run a method, at the start of a durable run or on a blocking run, the web app template's failure display now shows the runtime's next step in place of a generic hint, says whether running it again can help when the runtime says so, and lists the method's validation items under the technical details, with an unknown model's reference and the model deck's suggestions. An answer that carries none of this keeps its old wording.
 
 ## [v0.5.5] - 2026-09-25
 

@@ -31,6 +31,19 @@ A durable run that ends without a result is read from **its stored error report*
 
 **A run with no report keeps the SDK's sentence**, "Run finished with status FAILED; no result available", with the bare run id. That is every cancelled, terminated or timed-out run, every run the platform finalized itself, and every failed run on a platform that serves no report; the absence of a report says nothing about why.
 
+## A refused run
+
+When the runner refuses to run a method, at `/v1/start` in durable mode or at `/v1/execute` in blocking mode, it answers with a problem document, and the SDK throws it as an `ApiResponseError` carrying the document's members. `classifyResponse` keeps its classification by HTTP status (a `bad_request` for a 4xx, a `server_error` for a 5xx, the key errors for a 401 or 403) and reads the rest from the document:
+
+| The display       | From the problem document                                                                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What happened     | `detail`, the refusal's reason, as `serverMessage`.                                                                                                                                                                                   |
+| The next step     | `user_action.detail`, in place of the hint the HTTP status chose. A `wait_and_retry` advice is dropped, as on a failed run.                                                                                                           |
+| The retry line    | `retryable`, when the document says it; absent, nothing is claimed.                                                                                                                                                                   |
+| Technical details | `error_domain`, `retryable` and the user action's kind, then each validation item of a method that failed validation — for an unknown model, the reference the method wrote and the model deck's suggestions — ahead of the raw body. |
+
+An answer that is not a problem document, or carries none of these members, is classified exactly as before. A 401 or 403 keeps its hint about the API key, and a durable start refused by a blocking-only deployment keeps its own re-framing.
+
 ## Other failures
 
-A run that fails on the blocking path comes back as a refused request, an `ApiResponseError`, and is classified by its HTTP status like any other refusal. Every other kind (an unreachable API, a missing key, a durable-run lifecycle the URL does not serve, a file upload that failed, an output that does not match the method's contract) has its own branch in `classifyPipelineError`, and [`CLAUDE.md`](../CLAUDE.md) says how to add one.
+Every other kind (an unreachable API, a missing key, a durable-run lifecycle the URL does not serve, a file upload that failed, an output that does not match the method's contract) has its own branch in `classifyPipelineError`, and [`CLAUDE.md`](../CLAUDE.md) says how to add one.
